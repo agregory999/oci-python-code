@@ -16,8 +16,8 @@ def sizeof_fmt(num, suffix="B"):
 
 ### MAIN CODE ###
 # Grabs the default region
-config = from_file(profile_name="WINDSTREAM")
-#config = from_file()
+#config = from_file(profile_name="WINDSTREAM")
+config = from_file()
 validate_config(config)
 
 tenancy_id = config["tenancy"]
