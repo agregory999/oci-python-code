@@ -10,6 +10,7 @@ Script to pull all IAM policies from a tenancy and organize them by
 - Regular Policies
 
 The script attempts to parse each statement into a list of tuples.  Each tuple looks like:
+
 `(Subject) (Verb) (Resource) (Location) (Conditions)`
 
 Tuples should make it easier to sort later.
