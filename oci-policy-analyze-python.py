@@ -6,6 +6,7 @@ import argparse
 dynamic_group_statements = []
 service_statements = []
 regular_statements = []
+special_statements = []
 
 # Helper
 def print_statement(statement_tuple):
@@ -72,9 +73,15 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
         for index,statement in enumerate(policy.statements, start=1):
             print(f"{level_string}| > -- Statement {index}: {statement}", flush=True)
             
+            # Root out "special" statements (endorse / define / as)
+            if str.startswith(statement,"endorse") or str.startswith(statement,"admit") or str.startswith(statement,"define"):
+                special_statements.append(statement)
+                continue
+
             # Helper returns tuple
             statement_tuple = parse_statement(statement=statement, comp_string=comp_string, comp_name=comp.name)
-            #print_statement(statement_tuple)
+            if statement_tuple[0] is None or statement_tuple[0] == "":
+                print(f"****Statement {statement} resulted in bad tuple: {statement_tuple}")
 
             if "dynamic-group " in statement_tuple[0]:
                 dynamic_group_statements.append(statement_tuple)
@@ -127,6 +134,12 @@ print("========Enter Recursion==============")
 getNestedCompartment(identity_client=identity_client, comp_ocid=ocid, level=level, comp_string="")
 print("========Exit Recursion==============")
 
+# Print Special 
+print("========Summary Special==============")
+for index, statement in enumerate(special_statements, start=1):
+    print(f"Statement #{index}: {statement}")
+print(f"Total Special statement in tenancy: {len(special_statements)}")
+
 # Print Dynamic Groups
 print("========Summary DG==============")
 for index, statement in enumerate(dynamic_group_statements, start=1):
@@ -143,4 +156,4 @@ print(f"Total Service statement in tenancy: {len(service_statements)}")
 print("========Summary Reg==============")
 for index, statement in enumerate(regular_statements, start=1):
     print(f"Statement #{index}: {statement}")
-print(f"Total Reg statement in tenancy: {len(regular_statements)}")
+print(f"Total Regular statement in tenancy: {len(regular_statements)}")
