@@ -1,10 +1,10 @@
-# Windstream FSS Backup Process
+# FSS Backup Process
 
 [![linting: pylint](https://img.shields.io/badge/linting-pylint-yellowgreen)](https://github.com/PyCQA/pylint)
 
 Backup is accomplished using the Python script fss_backup.py
 
-The script attempts to be self-documing, ie run it with no arguments for basic help or `-h` for actual help:
+The script attempts to be self-documenting, ie run it with no arguments for basic help or `-h` for actual help:
 
 ```bash
 ./fss_backup.py 
@@ -212,7 +212,7 @@ echo "*********************************"
 date
 
 # File system1
-/root/windstream-oss/fss_backup.py -fc <FSS Compartment OCID> -oc <OSS Bucket OCID> -r oci-oss: -m <FSS Mount IP> -ad UWQV:US-ASHBURN-AD-3 --type weekly -v
+/root/code/fss_backup.py -fc <FSS Compartment OCID> -oc <OSS Bucket OCID> -r oci-oss: -m <FSS Mount IP> -ad UWQV:US-ASHBURN-AD-3 --type weekly -v
 
 # Filesystem2
 #./fss_backup.py <bunch of params>
