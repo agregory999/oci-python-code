@@ -37,10 +37,13 @@ def parse_statement(statement, comp_string, comp_name):
     elif "tenancy" in location:
         pass
     else:
+        sub_comp = location.partition("compartment ")[2]
         if comp_string == "":
-            location = f"compartment {comp_name}"
+            # if root, then leave compartment alone
+            #location = f"compartment {comp_name}"
+            pass
         else:
-            location = f"compartment {comp_string}:{comp_name}"
+            location = f"compartment {comp_string}:{sub_comp}"
 
     # Build tuple based on modified location
     statement_tuple = (subject,verb,resource,location,condition)
@@ -52,12 +55,12 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
     # Level Printer
     level_string = ""
     for i in range(level):
-        level_string += " "
+        level_string += "|  "
 
     # Print with level
     get_compartment_response = identity_client.get_compartment(compartment_id=comp_ocid)
     comp = get_compartment_response.data
-    print(f"{level_string} Name: {comp.name} ID: {comp_ocid} Hierarchy: {comp_string}")
+    print(f"{level_string}| Compartment Name: {comp.name} ID: {comp_ocid} Hierarchy: {comp_string}")
 
     # Get policies First
     list_policies_response = identity_client.list_policies(
@@ -65,9 +68,9 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
         limit=1000
     )
     for policy in list_policies_response.data:
-        print(f"{level_string} Policy: {policy.name} ID: {policy.id}")
+        print(f"{level_string}| > Policy: {policy.name} ID: {policy.id}")
         for index,statement in enumerate(policy.statements, start=1):
-            print(f"{level_string}   Statement {index}: {statement}", flush=True)
+            print(f"{level_string}| > -- Statement {index}: {statement}", flush=True)
             
             # Helper returns tuple
             statement_tuple = parse_statement(statement=statement, comp_string=comp_string, comp_name=comp.name)
@@ -122,34 +125,22 @@ identity_client = identity.IdentityClient(config)
 level = 0
 print("========Enter Recursion==============")
 getNestedCompartment(identity_client=identity_client, comp_ocid=ocid, level=level, comp_string="")
+print("========Exit Recursion==============")
 
 # Print Dynamic Groups
 print("========Summary DG==============")
-count = 0
-for i in dynamic_group_statements:
-    count += 1
-    print(f"Statement: {i}")
-print(f"Total DG statement in tenancy: {count}")
+for index, statement in enumerate(dynamic_group_statements, start=1):
+    print(f"Statement #{index}: {statement}")
+print(f"Total Service statement in tenancy: {len(dynamic_group_statements)}")
 
 # Print Service
 print("========Summary SVC==============")
-count = 0
-for i in service_statements:
-    count += 1
-    print(f"Statement: {i}")
-print(f"Total Service statement in tenancy: {count}")
+for index, statement in enumerate(service_statements, start=1):
+    print(f"Statement #{index}: {statement}")
+print(f"Total Service statement in tenancy: {len(service_statements)}")
 
 # Print Regular
 print("========Summary Reg==============")
-
-# Old Way
-count = 0
-for i in regular_statements:
-    count += 1
-    print(f"Statement: {i}")
-print(f"Total Reg statement in tenancy: {count}")
-
-# New Way
 for index, statement in enumerate(regular_statements, start=1):
     print(f"Statement #{index}: {statement}")
 print(f"Total Reg statement in tenancy: {len(regular_statements)}")
