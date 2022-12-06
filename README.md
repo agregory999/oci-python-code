@@ -14,19 +14,32 @@ The script attempts to parse each statement into a list of tuples.  Each tuple l
 
 `(Subject) (Verb) (Resource) (Location) (Conditions)`
 
-Tuples should make it easier to sort later.
+Tuples should make it easier to filter.
 
 The script starts wherever you tell it in the compartment hierarchy and recurses through all compartments.  To run it at the tenancy root, give -o <tenancy ocid>
 
 Optionally, if you use profiles in your OCI config (eg other than DEFAULT), pass in -pr/--profile to set that.  Omit if you only have a default
 
-Examples
+### Simple Examples
 ```
 python3 oci-policy-analyze-python.py -o ocid1.tenancy.oc1..zzzzzzzzzz
-
 python3 oci-policy-analyze-python.py -o ocid1.compartment.oc1..zzzzzzzzzz
-
 python3 oci-policy-analyze-python.py --profile CUSTOMER -o ocid1.tenancy.oc1..zzzzzzzzz
+```
+
+### Filter Examples
+
+The flags below can be used independently or in tandem:
+- `-sf/--subjectfilter` Filter all statement subjects by this text
+- `-vf/--verbfilter` Filter all verbs (inspect,read,use,manage) by this text
+- `-rf/--resourcefilter` Filter all resource (eg database or stream-family etc) subjects by this text
+- `-lf/--locationfilter` Filter all location (eg compartment name) subjects by this text
+
+```
+# Filter statements by group ABC and verb manage
+python3 oci-policy-analyze-python.py -o ocid1.compartment.oc1..zzzzzzzzzz -sf ABC -vf manage
+# Filter alternate OCI profile tenancy level by compartment DEF
+python3 oci-policy-analyze-python.py --profile CUSTOMER -o ocid1.tenancy.oc1..zzzzzzzzz -lf DEF
 
 
 ```
