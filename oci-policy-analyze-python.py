@@ -51,7 +51,11 @@ def parse_statement(statement, comp_string, comp_name):
     return statement_tuple
     
 # Recursive Compartments / Policies
-def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
+def getNestedCompartment(identity_client, comp_ocid, level, comp_string, verbose):
+
+    # Print something if not verbose
+    if not verbose:
+        print("c",end='',flush=True)
 
     # Level Printer
     level_string = ""
@@ -61,7 +65,8 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
     # Print with level
     get_compartment_response = identity_client.get_compartment(compartment_id=comp_ocid)
     comp = get_compartment_response.data
-    print(f"{level_string}| Compartment Name: {comp.name} ID: {comp_ocid} Hierarchy: {comp_string}")
+    if verbose:
+        print(f"{level_string}| Compartment Name: {comp.name} ID: {comp_ocid} Hierarchy: {comp_string}")
 
     # Get policies First
     list_policies_response = identity_client.list_policies(
@@ -69,9 +74,15 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
         limit=1000
     )
     for policy in list_policies_response.data:
-        print(f"{level_string}| > Policy: {policy.name} ID: {policy.id}")
+        if not verbose:
+            print("p",end='',flush=True)
+        else:
+                print(f"{level_string}| > Policy: {policy.name} ID: {policy.id}")
         for index,statement in enumerate(policy.statements, start=1):
-            print(f"{level_string}| > -- Statement {index}: {statement}", flush=True)
+            if not verbose:
+                print("s",end='',flush=True)
+            else:
+                print(f"{level_string}| > -- Statement {index}: {statement}", flush=True)
             
             # Root out "special" statements (endorse / define / as)
             if str.startswith(statement,"endorse") or str.startswith(statement,"admit") or str.startswith(statement,"define"):
@@ -81,7 +92,8 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
             # Helper returns tuple
             statement_tuple = parse_statement(statement=statement, comp_string=comp_string, comp_name=comp.name)
             if statement_tuple[0] is None or statement_tuple[0] == "":
-                print(f"****Statement {statement} resulted in bad tuple: {statement_tuple}")
+                if verbose:
+                    print(f"****Statement {statement} resulted in bad tuple: {statement_tuple}")
 
             if "dynamic-group " in statement_tuple[0]:
                 dynamic_group_statements.append(statement_tuple)
@@ -109,9 +121,9 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string):
        
         # Recurse
         if comp_string == "":
-            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, comp_string=comp_string + comp.name)
+            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, comp_string=comp_string + comp.name, verbose=verbose)
         else:
-            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, comp_string=comp_string + ":" + comp.name)
+            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, comp_string=comp_string + ":" + comp.name, verbose=verbose)
 
 # Main Code
 
@@ -120,10 +132,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
 parser.add_argument("-o", "--ocid", help="OCID of compartment or tenancy", required=True)
 parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
+parser.add_argument("-sf", "--subjectfilter", help="Filter all statement subjects by this text")
+parser.add_argument("-vf", "--verbfilter", help="Filter all verbs (inspect,read,use,manage) by this text")
+parser.add_argument("-rf", "--resourcefilter", help="Filter all resource (eg database or stream-family etc) subjects by this text")
+parser.add_argument("-lf", "--locationfilter", help="Filter all location (eg compartment name) subjects by this text")
 args = parser.parse_args()
 verbose = args.verbose
 ocid = args.ocid
 profile = args.profile
+sub_filter = args.subjectfilter
+verb_filter = args.verbfilter
+resource_filter = args.resourcefilter
+location_filter = args.locationfilter
 
 config = config.from_file(profile_name=profile)
 identity_client = identity.IdentityClient(config)
@@ -131,8 +151,38 @@ identity_client = identity.IdentityClient(config)
 # Initial Recursion
 level = 0
 print("========Enter Recursion==============")
-getNestedCompartment(identity_client=identity_client, comp_ocid=ocid, level=level, comp_string="")
-print("========Exit Recursion==============")
+getNestedCompartment(identity_client=identity_client, comp_ocid=ocid, level=level, comp_string="", verbose=verbose)
+print("\n========Exit Recursion==============")
+
+# Perform Filtering
+if sub_filter:
+    print(f"Filtering subject: {sub_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+    dynamic_group_statements = list(filter(lambda statement: sub_filter in statement[0],dynamic_group_statements))
+    service_statements = list(filter(lambda statement: sub_filter in statement[0],service_statements))
+    regular_statements = list(filter(lambda statement: sub_filter in statement[0],regular_statements))
+    print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+
+if verb_filter:
+    print(f"Filtering verb: {verb_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+    dynamic_group_statements = list(filter(lambda statement: verb_filter in statement[1],dynamic_group_statements))
+    service_statements = list(filter(lambda statement: verb_filter in statement[1],service_statements))
+    regular_statements = list(filter(lambda statement: verb_filter in statement[1],regular_statements))
+    print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+
+if resource_filter:
+    print(f"Filtering resource: {resource_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+    dynamic_group_statements = list(filter(lambda statement: resource_filter in statement[2],dynamic_group_statements))
+    service_statements = list(filter(lambda statement: resource_filter in statement[2],service_statements))
+    regular_statements = list(filter(lambda statement: resource_filter in statement[2],regular_statements))
+    print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+
+if location_filter:
+    print(f"Filtering location: {location_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+    dynamic_group_statements = list(filter(lambda statement: location_filter in statement[3],dynamic_group_statements))
+    service_statements = list(filter(lambda statement: location_filter in statement[3],service_statements))
+    regular_statements = list(filter(lambda statement: location_filter in statement[3],regular_statements))
+    print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+
 
 # Print Special 
 print("========Summary Special==============")
