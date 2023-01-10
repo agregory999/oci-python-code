@@ -1,13 +1,10 @@
 from oci import config
-from oci.database_management import DbManagementClient
-from oci.usage_api import UsageapiClient
-from oci.usage_api.models import RequestSummarizedUsagesDetails,Filter,Dimension,Tag
 from oci.database import DatabaseClient
 from oci.monitoring import MonitoringClient
 from oci.monitoring.models import SummarizeMetricsDataDetails
 from oci.exceptions import ServiceError
 
-import os, time
+import argparse, time
 from datetime import datetime, timedelta
 import logging
 
@@ -17,44 +14,51 @@ import logging
 # for more info
 
 
-comp_id = os.environ.get('COMPARTMENT_OCID')
-exa_id = os.environ.get('EXA_OCID')
-profile = os.environ.get('PROFILE',"DEFAULT")
+# Main Routine
+parser = argparse.ArgumentParser()
+parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
+parser.add_argument("-exa", "--exainfraocid", help="Exadata Infrastructure OCID", required=True)
+parser.add_argument("-c", "--compartmentocid", help="Database Compartment OCID", required=True)
+parser.add_argument("-ns", "--costtrackingns", help="Cost Tracking tag namespace", required=True)
+parser.add_argument("-k", "--costtrackingkey", help="Cost Tracking tag key", required=True)
+parser.add_argument("-d", "--daystoaverage", help="Days of data to analyze storage usage for", default=30)
 
-logging.getLogger('oci').setLevel(logging.DEBUG)
+args = parser.parse_args()
+verbose = args.verbose
+profile = args.profile
+frame_ns = args.costtrackingns
+frame_key = args.costtrackingkey
+exa_ocid = args.exainfraocid
+comp_ocid = args.compartmentocid
+days_to_average = args.daystoaverage
 
-if comp_id is None:
-    print(f"You didn't set COMPARTMENT_OCID into shell.")
-    exit(1)
-
+# If required, verbose
+if verbose:
+    print(f'Using verbose mode')
+    logging.getLogger('oci').setLevel(logging.DEBUG)
 print(f"Using profile {profile}.")
+print(f'Using {days_to_average} days of data to analyze storage')
 
 # Initialize service client with default config file
 config = config.from_file(profile_name=profile)
 
-#config["log_requests"] = True
-database_management_client = DbManagementClient(config)
+# Set up OCI clients
 database_client = DatabaseClient(config)
-usage_client = UsageapiClient(config)
 monitoring_client = MonitoringClient(config)
 
 # Main Flow - start with Infra OCID to get name
-# ie ocid1.cloudexadatainfrastructure.oc1.iad.anuwcljthwcsg7aamltlbfnxf4lpqt5epmjfaquso6eaugpui4batr5wnktq = exacs_ash_ad3_npr1
-# Comp OCID = ocid1.compartment.oc1..aaaaaaaabhc7rad3qzwlpls3pmwf62vmhdkbmx7dphvh2c2nnw5av3gu3hta
-
-# Prod 1-1
-# export COMPARTMENT_OCID=ocid1.compartment.oc1..aaaaaaaadnzdzsy7cwvndq2xmsbyrcslex6x7lvhzkdpk7sde6n4gpe7tspa
-# export EXA_OCID=ocid1.cloudexadatainfrastructure.oc1.iad.anuwcljshwcsg7aa74rbufzcpzgqie3vx72pgd5nj52be6aasunzbcqx446q
-
+# Script pulls Infra Detail, VM Cluster Detail (storage info)
+# Then loops over all DBs and pulls details on storage used
 
 # Get Infra
 try:
 
     # Get Infra Detail
     rack = database_client.get_cloud_exadata_infrastructure(
-        cloud_exadata_infrastructure_id=exa_id
+        cloud_exadata_infrastructure_id=exa_ocid
     ).data
-    #print(f"Rack Detail: Comp:{rack}", flush=True)
+
     print(f"Rack Detail: Comp:{rack.compute_count} Storage Count: {rack.storage_count} Total Storage(all ASM): {rack.total_storage_size_in_gbs} ID: {rack.id}", flush=True)
 
     # Apparantly not there yet
@@ -65,70 +69,91 @@ try:
 
     # Cloud VM Cluster
     vm_cluster = database_client.list_cloud_vm_clusters(
-        compartment_id=comp_id,
+        compartment_id=comp_ocid,
         cloud_exadata_infrastructure_id=rack.id
     ).data[0] # List of CloudVmClusterSummary - but only need first one of them
 
     # Try to get ExaCS Frame tag
-    frame_tag = vm_cluster.defined_tags["Windstream_Tags"]["ExaCS_Frame"]
+    frame_tag = vm_cluster.defined_tags[frame_ns][frame_key]
+
     # Print DB ID and Tags
-    #print(f"VM Cluster Detail: {vm_cluster}", flush=True)
-    print(f"VM Cluster Detail: {vm_cluster.cluster_name} Tags: {frame_tag} ID: {vm_cluster.id}", flush=True)
+    print(f"VM Cluster Detail: {vm_cluster.display_name} Tags: {frame_tag} ID: {vm_cluster.id}", flush=True)
 
-
- 
     # Total CPU and Storage
     rack_usable_storage = vm_cluster.storage_size_in_gbs * vm_cluster.data_storage_percentage * .01
     remaining_rack_usable_storage = rack_usable_storage
-    print(f"Total OCPU: {vm_cluster.cpu_core_count} / Usable DATA Storage GB: {rack_usable_storage}",flush=True)
+    print(f"Total OCPU: {vm_cluster.cpu_core_count} / Usable DATA Storage GB: {rack_usable_storage:.2f}",flush=True)
+
+    # From ASM Metric
+    # last 24 hours only
+    end_time = datetime.now()
+    start_time = end_time - timedelta(days = 1)
+    summarize_metrics_data_response = monitoring_client.summarize_metrics_data(
+        compartment_id=comp_ocid,
+        summarize_metrics_data_details=SummarizeMetricsDataDetails(
+            namespace="oci_database_cluster",
+            #query=f'StorageAllocatedByTablespace[1d]{{resourceId_database ="{db.id}" }}.mean()',
+            query=f'ASMDiskgroupUtilization[1d]{{diskgroupName="ora.datac1.dg", resourceName="{vm_cluster.display_name}"}}.mean()',
+            start_time=f"{start_time.isoformat()}Z",
+            end_time=f"{end_time.isoformat()}Z",
+            resolution="6h")
+    ).data
+    #print(f"Remaining Unused Storage GB (DATAC1 from ASM): {summarize_metrics_data_response}")
+    print(f"Storage % consumed (DATAC1 from ASM): {summarize_metrics_data_response[0].aggregated_datapoints[0].value:.2f}")
 
     # For each database on rack, get min_cpu_count and storage used
     # Cloud VM Cluster
     databases = database_client.list_databases(
-        compartment_id=comp_id,
+        compartment_id=comp_ocid,
         system_id=vm_cluster.id,
         limit=100
-
     ).data # List of DatabaseSummary
 
     for i,db in enumerate(databases,start=1):
         # DB Details
 
-        # Storage in use / Metric / 30 day average of average storage used
+        # Storage in use / Metric / XX day average of average storage used
         # StorageUsed[1d]{resourceId_database = "DB OCID"}.mean()
         end_time = datetime.now()
-        start_time = end_time - timedelta(days = 30)
+        start_time = end_time - timedelta(days = days_to_average)
         summarize_metrics_data_response = monitoring_client.summarize_metrics_data(
-            compartment_id=comp_id,
+            compartment_id=comp_ocid,
             summarize_metrics_data_details=SummarizeMetricsDataDetails(
                 namespace="oci_database",
+                #query=f'StorageAllocatedByTablespace[1d]{{resourceId_database ="{db.id}" }}.mean()',
                 query=f'StorageUsed[1d]{{resourceId_database ="{db.id}" }}.mean()',
                 start_time=f"{start_time.isoformat()}Z",
                 end_time=f"{end_time.isoformat()}Z",
                 resolution="6h")
         ).data
-        if summarize_metrics_data_response:
 
-            # Loop to get an average
-            sum = 0
-            for dp in summarize_metrics_data_response[0].aggregated_datapoints:
-                sum = sum + dp.value
-            storage_used = sum / len(summarize_metrics_data_response[0].aggregated_datapoints)
-            
-            # Decrement Storage Remaining
-            remaining_rack_usable_storage = remaining_rack_usable_storage - storage_used
-            potential_percent_of_total = storage_used / (rack_usable_storage) * 100
-            #print(f'{i}: Database {db.id} Storage Used: {summarize_metrics_data_response}', flush=True)
-            print(f'{i}: Database {db.db_unique_name} Storage Used GB: {storage_used:.2f}, Percent: {potential_percent_of_total:.2f}', flush=True)
+        # Add and average the datapoints - probably a better way to do this...
+        print(f"{i}: DB: {db.db_unique_name}, Status: {db.lifecycle_state }")
+
+        if summarize_metrics_data_response:
+            print(f'{i} DB: {db.db_unique_name}')
+            for j,ts in enumerate(summarize_metrics_data_response):
+                sum = 0
+                for dp in ts.aggregated_datapoints:
+                    sum = sum + dp.value
+                storage_used = sum / len(ts.aggregated_datapoints)
+                
+                # Decrement from total
+                remaining_rack_usable_storage = remaining_rack_usable_storage - storage_used
+                
+                # Print summary
+                print(f'    Storage Used GB: {storage_used:.2f}')
         else:
-            print(f"No Metrics for DB: {db.db_unique_name}, Status: {db.lifecycle_state }")
+            print(f"    No Metrics for DB: {db.db_unique_name}")
         
         # Sleep a moment to give API some rest
         time.sleep(.5)
-    # Print Remaining Storage
-    print(f"Remaining Unused DATA Storage GB: {remaining_rack_usable_storage:.2f}")
+    # Print Remaining Storage (Decrement)
+    print(f"Remaining Unused Storage GB: {remaining_rack_usable_storage:.2f}")
+
+
 except ServiceError as exc:
-    print(f"Failed to get details for {exa_id}: {exc}")
+    print(f"Failed to get details for {exa_ocid}: {exc}")
 
 
 

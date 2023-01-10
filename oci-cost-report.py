@@ -13,6 +13,8 @@ parser.add_argument("-pr", "--profile", help="Config Profile, named", default="D
 parser.add_argument("-t", "--costtrackingtag", help="Cost Tracking tag value", required=True)
 parser.add_argument("-ns", "--costtrackingns", help="Cost Tracking tag namespace", required=True)
 parser.add_argument("-k", "--costtrackingkey", help="Cost Tracking tag key", required=True)
+parser.add_argument("-sd", "--startdate", help="Start Date YYYY-MM-DD", required=True)
+parser.add_argument("-ed", "--enddate", help="Start Date YYYY-MM-DD (give next day to include previous)", required=True)
 
 args = parser.parse_args()
 verbose = args.verbose
@@ -20,6 +22,8 @@ profile = args.profile
 frame_ns = args.costtrackingns
 frame_tag = args.costtrackingtag
 frame_key = args.costtrackingkey
+start_date = args.startdate
+end_date = args.enddate
 
 logging.getLogger('oci').setLevel(logging.DEBUG)
 
@@ -40,8 +44,8 @@ cost_query = RequestSummarizedUsagesDetails(
         tenant_id=tenancy_ocid,
         query_type=RequestSummarizedUsagesDetails.QUERY_TYPE_COST,
         compartment_depth=6.0,
-        time_usage_started=f'2022-11-01T00:00:00.000000Z',
-        time_usage_ended=f'2022-12-01T00:00:00.000000Z',
+        time_usage_started=f'{start_date}T00:00Z',
+        time_usage_ended=f'{end_date}T00:00Z',
         is_aggregate_by_time=False,
         granularity=RequestSummarizedUsagesDetails.GRANULARITY_MONTHLY,
         #group_by=["skuPartNumber"],
