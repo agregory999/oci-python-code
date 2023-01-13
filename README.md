@@ -1,6 +1,6 @@
 # OCI Python Code
 
-A collection of python scripts that I have built, to do things using the API.  These are not OCI functions, but could be.  If so, these can go into a functions subdirectory.
+A collection of python scripts that I have built, to do things using the OCI APIs.  
 
 ## General Notes
 In order to utilize the OCI API, you must initialize using PIP:
