@@ -19,16 +19,12 @@ import csv
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
 parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
-#parser.add_argument("-exa", "--exainfraocid", help="Exadata Infrastructure OCID", required=True)
 parser.add_argument("-c", "--compartmentocid", help="Database Compartment OCID", required=True)
-#parser.add_argument("-ns", "--costtrackingns", help="Cost Tracking tag namespace", required=True)
-#parser.add_argument("-k", "--costtrackingkey", help="Cost Tracking tag key", required=True)
 parser.add_argument("-d", "--daystoaverage", help="Days of data to analyze storage usage for", default=30)
 
 args = parser.parse_args()
 verbose = args.verbose
 profile = args.profile
-#exa_ocid = args.exainfraocid
 comp_ocid = args.compartmentocid
 days_to_average = args.daystoaverage
 
@@ -80,7 +76,7 @@ with open(f'storage-used-{time.strftime("%Y%m%d-%H%M%S")}-{comp_ocid}.csv', 'w',
                 # Storage in use / Metric / XX day average of average storage used
                 # StorageUsed[1d]{resourceId_database = "DB OCID"}.mean()
                 end_time = datetime.now()
-                start_time = end_time - timedelta(days = 1)
+                start_time = end_time - timedelta(days = days_to_average)
                 summarize_metrics_data_response = monitoring_client.summarize_metrics_data(
                     compartment_id=comp_ocid,
                     summarize_metrics_data_details=SummarizeMetricsDataDetails(
@@ -95,7 +91,12 @@ with open(f'storage-used-{time.strftime("%Y%m%d-%H%M%S")}-{comp_ocid}.csv', 'w',
                 # Add and average the datapoints - probably a better way to do this...
 
                 if summarize_metrics_data_response:
-                    storage_used = summarize_metrics_data_response[0].aggregated_datapoints[0].value
+                    sum = 0
+                    for dp in summarize_metrics_data_response[0].aggregated_datapoints:
+                        sum = sum + dp.value
+                    storage_used = sum / len(summarize_metrics_data_response[0].aggregated_datapoints)
+
+                    #storage_used = summarize_metrics_data_response[0].aggregated_datapoints[0].value
                     print(f'{storage_used:.2f}')
                     csv_writer.writerow([cluster.id,cluster.display_name,db.id,db.db_unique_name,db.lifecycle_state,f"{storage_used:.2f}"])
                 else:
