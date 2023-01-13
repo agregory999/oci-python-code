@@ -71,7 +71,6 @@ python3 oci-policy-analyze-python.py -o ocid1.compartment.oc1..zzzzzzzzzz -sf AB
 # Filter alternate OCI profile tenancy level by compartment DEF
 python3 oci-policy-analyze-python.py --profile CUSTOMER -o ocid1.tenancy.oc1..zzzzzzzzz -lf DEF
 
-
 ```
 
 ## OCI List Bucket Sizes
@@ -82,4 +81,13 @@ Script iterates Regions and Compartments, lists OSS buckets, and formats the app
 
 Script originally written for a customer.  Has its own [README](fss-backup/README.md).
 
-## Streaming
+## Streaming 
+
+[These scripts](oci-streaming/) are able to use Kafka libraries to produce and consume from OCI Streaming.   This must be enabled on the tenancy, with policy and permission, as well as the setup of Stream Pools and Streams.  See the help that comes out:
+
+```bash
+prompt > python3 ./consume-kafka.py                                                                                                                         
+usage: consume-kafka.py [-h] [-v] -p STREAMPOOL -u USERNAME -a AUTHTOKEN -t TENANCYNAME -s STREAM [-e ENDPOINT]
+consume-kafka.py: error: the following arguments are required: -p/--streampool, -u/--username, -a/--authtoken, -t/--tenancyname, -s/--stream
+
+```
