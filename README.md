@@ -77,6 +77,11 @@ python3 oci-policy-analyze-python.py --profile CUSTOMER -o ocid1.tenancy.oc1..zz
 
 Script iterates Regions and Compartments, lists OSS buckets, and formats the approximate size.
 
+## OCI ExaCS Failed PDB
+
+Script iterates PDBs in a compartment and prints information for the PDB and CDB if it shows as failed.
+
+
 ## OCI FSS Backup
 
 Script originally written for a customer.  Has its own [README](fss-backup/README.md).
