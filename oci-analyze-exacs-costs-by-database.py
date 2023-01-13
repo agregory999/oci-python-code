@@ -43,6 +43,10 @@ print(f'Using {days_to_average} days of data to analyze storage')
 # Initialize service client with default config file
 config = config.from_file(profile_name=profile)
 
+#print(config["tenancy"],flush=True)
+
+#exit(0)
+
 # Set up OCI clients
 database_client = DatabaseClient(config)
 monitoring_client = MonitoringClient(config)

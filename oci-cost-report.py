@@ -14,7 +14,7 @@ parser.add_argument("-t", "--costtrackingtag", help="Cost Tracking tag value", r
 parser.add_argument("-ns", "--costtrackingns", help="Cost Tracking tag namespace", required=True)
 parser.add_argument("-k", "--costtrackingkey", help="Cost Tracking tag key", required=True)
 parser.add_argument("-sd", "--startdate", help="Start Date YYYY-MM-DD", required=True)
-parser.add_argument("-ed", "--enddate", help="Start Date YYYY-MM-DD (give next day to include previous)", required=True)
+parser.add_argument("-ed", "--enddate", help="Start Date YYYY-MM-DD (give next day to include previous day)", required=True)
 
 args = parser.parse_args()
 verbose = args.verbose

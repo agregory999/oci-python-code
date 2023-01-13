@@ -157,30 +157,30 @@ print("\n========Exit Recursion==============")
 # Perform Filtering
 if sub_filter:
     print(f"Filtering subject: {sub_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    dynamic_group_statements = list(filter(lambda statement: sub_filter in statement[0],dynamic_group_statements))
-    service_statements = list(filter(lambda statement: sub_filter in statement[0],service_statements))
-    regular_statements = list(filter(lambda statement: sub_filter in statement[0],regular_statements))
+    dynamic_group_statements = list(filter(lambda statement: sub_filter.casefold() in statement[0].casefold(),dynamic_group_statements))
+    service_statements = list(filter(lambda statement: sub_filter.casefold() in statement[0].casefold(),service_statements))
+    regular_statements = list(filter(lambda statement: sub_filter.casefold() in statement[0].casefold(),regular_statements))
     print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
 if verb_filter:
     print(f"Filtering verb: {verb_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    dynamic_group_statements = list(filter(lambda statement: verb_filter in statement[1],dynamic_group_statements))
-    service_statements = list(filter(lambda statement: verb_filter in statement[1],service_statements))
-    regular_statements = list(filter(lambda statement: verb_filter in statement[1],regular_statements))
+    dynamic_group_statements = list(filter(lambda statement: verb_filter.casefold() in statement[1].casefold(),dynamic_group_statements))
+    service_statements = list(filter(lambda statement: verb_filter.casefold() in statement[1].casefold(),service_statements))
+    regular_statements = list(filter(lambda statement: verb_filter.casefold() in statement[1].casefold(),regular_statements))
     print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
 if resource_filter:
     print(f"Filtering resource: {resource_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    dynamic_group_statements = list(filter(lambda statement: resource_filter in statement[2],dynamic_group_statements))
-    service_statements = list(filter(lambda statement: resource_filter in statement[2],service_statements))
-    regular_statements = list(filter(lambda statement: resource_filter in statement[2],regular_statements))
+    dynamic_group_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(),dynamic_group_statements))
+    service_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(),service_statements))
+    regular_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(),regular_statements))
     print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
 if location_filter:
     print(f"Filtering location: {location_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    dynamic_group_statements = list(filter(lambda statement: location_filter in statement[3],dynamic_group_statements))
-    service_statements = list(filter(lambda statement: location_filter in statement[3],service_statements))
-    regular_statements = list(filter(lambda statement: location_filter in statement[3],regular_statements))
+    dynamic_group_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(),dynamic_group_statements))
+    service_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(),service_statements))
+    regular_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(),regular_statements))
     print(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
 
