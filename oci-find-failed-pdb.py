@@ -6,15 +6,8 @@ from oci.monitoring.models import SummarizeMetricsDataDetails
 from oci.exceptions import ServiceError
 
 import argparse, time
-from datetime import datetime, timedelta
 import logging
-import csv
-import os
 
-# Create a default config using DEFAULT profile in default location
-# Refer to
-# https://docs.cloud.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm#SDK_and_CLI_Configuration_File
-# for more info
 
 # Logging
 logging.basicConfig
@@ -49,12 +42,9 @@ database_client = DatabaseClient(config)
 monitoring_client = MonitoringClient(config)
 secrets_client = SecretsClient(config)
 
-# Main Flow - start with Infra OCID to get name
-# Script pulls Infra Detail, VM Cluster Detail (storage info)
-# Then loops over all DBs and pulls details on storage used
+# Main Flow - start with Compartment OCID
+# Script pulls PDB Info.  If failed, grab CDB Info and display UI remediation info
 
-
-# Get Infra
 try:
 
     # Get all VM Clusters
@@ -65,15 +55,15 @@ try:
     # For each cluster, get DB
     for cluster in vm_clusters:
 
-        # For each database in cluster, get min_cpu_count and storage used
-        # Cloud VM Cluster
+        # Get PDBs
         databases = database_client.list_pluggable_databases(
             compartment_id=comp_ocid, 
             limit=1000
         ).data # List of DatabaseSummary
 
+        # Loop over PDB
         for pdb in databases:
-            # DB Details
+            # DB Details if verbose
             logger.debug(f"CDB: {pdb.container_database_id} PDB: {pdb.pdb_name}, Status: {pdb.lifecycle_state}")
 
             # Only print detail if failed
