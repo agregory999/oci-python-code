@@ -8,6 +8,7 @@ import argparse, time
 from datetime import datetime, timedelta
 import logging
 import csv
+import os
 
 # Create a default config using DEFAULT profile in default location
 # Refer to
@@ -46,9 +47,14 @@ monitoring_client = MonitoringClient(config)
 # Script pulls Infra Detail, VM Cluster Detail (storage info)
 # Then loops over all DBs and pulls details on storage used
 
-with open(f'storage-used-{time.strftime("%Y%m%d-%H%M%S")}-{comp_ocid}.csv', 'w', newline='') as csvfile:
+# Define file name(s)
+output_file_name = f'storage-used-{time.strftime("%Y%m%d-%H%M%S")}-{comp_ocid}.csv'
+temp_file_name = f'/tmp/{output_file_name}'
+
+# Open the file for writing
+with open(temp_file_name, 'w', newline='') as csvfile:
     # Set up CSV
-    csv_writer = csv.writer(csvfile, delimiter=',',
+    csv_writer = csv.writer(csvfile, delimiter='^',
                             quotechar='"', quoting=csv.QUOTE_MINIMAL)
     # Get Infra
     try:
@@ -107,5 +113,15 @@ with open(f'storage-used-{time.strftime("%Y%m%d-%H%M%S")}-{comp_ocid}.csv', 'w',
     except ServiceError as exc:
         print(f"Failed to get details: {exc}")
 
+# Re-open /tmp output &
+# Open the file for writing
+with open(temp_file_name, 'r', newline='') as csvfile_read:
+    with open(output_file_name, 'w', newline='') as newfile_write:
+        file = csvfile_read.readlines()
+        for line in file:
+            newfile_write.write(str.replace(line,'^',' | '))
+    newfile_write.close
+csvfile_read.close
 
-
+# Delete temp file
+os.remove(temp_file_name)           
