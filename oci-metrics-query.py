@@ -3,17 +3,9 @@ from oci.monitoring import MonitoringClient
 from oci.monitoring.models import SummarizeMetricsDataDetails
 from oci.exceptions import ServiceError
 
-import argparse, time
+import argparse
 from datetime import datetime, timedelta
 import logging
-import csv
-import os
-
-# Create a default config using DEFAULT profile in default location
-# Refer to
-# https://docs.cloud.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm#SDK_and_CLI_Configuration_File
-# for more info
-
 
 # Main Routine
 parser = argparse.ArgumentParser()
@@ -50,8 +42,7 @@ try:
     start_time = end_time - timedelta(days = days_to_average)
 
     # Operation
-    #fs_string = "/*ora002|/*ora003|/*ora004|/*ora005|/*ora006|/*ora007|/*ora008|/*ora009"
-    fs_string = "*"
+    fs_string = "/*ora002|/*ora003|/*ora004|/*ora005|/*ora006|/*ora007|/*ora008|/*ora009"
     
     # Define query
     query = SummarizeMetricsDataDetails(

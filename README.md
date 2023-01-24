@@ -73,6 +73,62 @@ python3 oci-policy-analyze-python.py --profile CUSTOMER -o ocid1.tenancy.oc1..zz
 
 ```
 
+## OCI Metrics Alarm History
+
+Script to show metrics history and specifically call out when a metric goes over and under a specific threshold.  Alarms that watch multiple metric streams may stay in FIRING state (not good) for a long time.  This doesn't provide details of when each stream crossed the threshold set by the alarm (over or under).  This script does that.  It looks at XX days of history, takes a metrics query, and a threshold value (similar to alarm).  Then it pulls all data and only shows when it exceeds or falls below the thresold.
+
+### Usage
+
+Provide the required params as such:
+
+```
+prompt> oci-python-code % python3 ./oci-metrics-alarm-history.py --help                    
+usage: oci-metrics-alarm-history.py [-h] [-v] [-pr PROFILE] -c COMPARTMENTOCID -n NAMESPACE
+                                    [-r RESOURCEGROUP] [-d DAYS] -q QUERY -t THRESHOLD
+
+options:
+  -h, --help            show this help message and exit
+  -v, --verbose         increase output verbosity
+  -pr PROFILE, --profile PROFILE
+                        Config Profile, named
+  -c COMPARTMENTOCID, --compartmentocid COMPARTMENTOCID
+                        Metrics Compartment OCID
+  -n NAMESPACE, --namespace NAMESPACE
+                        Metrics Namespace
+  -r RESOURCEGROUP, --resourcegroup RESOURCEGROUP
+                        Resource Group
+  -d DAYS, --days DAYS  Days of data to analyze
+  -q QUERY, --query QUERY
+                        Full metric query
+  -t THRESHOLD, --threshold THRESHOLD
+                        Numeric threshold when crossed (will check value
+```
+
+### Example
+
+Example, providing a profile (OCI Config), and a complex query
+
+```
+prompt> python3 ./oci-metrics-alarm-history.py -c ocid1.compartment.oc1..xxx -n oracle_appmgmt -t 95 -r host -d 60 -q 'FilesystemUtilization[6h]{fileSystemName !~ "/*ora002|/*ora003|/*ora004|/*ora005|/*ora006|/*ora007|/*ora008|/*ora009"}.mean()' -pr YYY
+
+Using profile YYY.
+Using 60 days of data
+Using ocid1.compartment.oc1..xxx / oracle_appmgmt / host / FilesystemUtilization[6h]{fileSystemName !~ "/*ora002|/*ora003|/*ora004|/*ora005|/*ora006|/*ora007|/*ora008|/*ora009"}.mean() / threshold 95
+Metrics Query: {
+  "end_time": "2023-01-24T11:20:29.554533Z",
+  "namespace": "oracle_appmgmt",
+  "query": "FilesystemUtilization[6h]{fileSystemName !~ \"/*ora002|/*ora003|/*ora004|/*ora005|/*ora006|/*ora007|/*ora008|/*ora009\"}.mean()",
+  "resolution": null,
+  "resource_group": "host",
+  "start_time": "2022-11-25T11:20:29.554533Z"
+}
+Metrics Result Size: 480
+Host XXX File System /fwr/addr exceeded threshold ( t: 95 / val: 99.35100000000017 ) at 2023-01-13 17:00:00+00:00
+Host YYY File System /epy/ora_export exceeded threshold ( t: 95 / val: 97.61499999999987 ) at 2023-01-13 17:00:00+00:00
+Host ZZZ File System /u00 exceeded threshold ( t: 95 / val: 97.75488757396457 ) at 2023-01-13 17:00:00+00:00
+Host ZZZ File System /u00 went below threshold ( t: 95 / val: 75.79682500000013 ) at 2023-01-17 23:00:00+00:00
+```
+
 ## OCI List Bucket Sizes
 
 Script iterates Regions and Compartments, lists OSS buckets, and formats the approximate size.
