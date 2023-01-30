@@ -65,6 +65,7 @@ try:
         for pdb in databases:
             # DB Details if verbose
             logger.debug(f"CDB: {pdb.container_database_id} PDB: {pdb.pdb_name}, Status: {pdb.lifecycle_state}")
+            print(f"CDB: {pdb.container_database_id} PDB: {pdb.pdb_name}, Status: {pdb.lifecycle_state}",flush=True)
 
             # Only print detail if failed
             if pdb.lifecycle_state == "FAILED":

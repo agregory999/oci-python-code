@@ -1,3 +1,4 @@
+#! /usr/local/bin/python3
 from oci import config
 from oci import identity
 import argparse

@@ -22,7 +22,7 @@ parser.add_argument("-exa", "--exainfraocid", help="Exadata Infrastructure OCID"
 parser.add_argument("-c", "--compartmentocid", help="Database Compartment OCID", required=True)
 parser.add_argument("-ns", "--costtrackingns", help="Cost Tracking tag namespace", required=True)
 parser.add_argument("-k", "--costtrackingkey", help="Cost Tracking tag key", required=True)
-parser.add_argument("-d", "--daystoaverage", help="Days of data to analyze storage usage for", default=30)
+parser.add_argument("-d", "--daystoaverage", help="Days of data to analyze storage usage for", type=int, default=30)
 
 args = parser.parse_args()
 verbose = args.verbose

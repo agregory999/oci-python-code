@@ -1,6 +1,8 @@
 from oci import config
 from oci.database import DatabaseClient
 from oci.monitoring import MonitoringClient
+from oci.database_management import DbManagementClient
+from oci.database_management.models import DatabaseParametersCollection
 from oci.monitoring.models import SummarizeMetricsDataDetails
 from oci.exceptions import ServiceError
 
@@ -9,12 +11,6 @@ from datetime import datetime, timedelta
 import logging
 import csv
 import os
-
-# Create a default config using DEFAULT profile in default location
-# Refer to
-# https://docs.cloud.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm#SDK_and_CLI_Configuration_File
-# for more info
-
 
 # Main Routine
 parser = argparse.ArgumentParser()
@@ -42,6 +38,7 @@ config = config.from_file(profile_name=profile)
 # Set up OCI clients
 database_client = DatabaseClient(config)
 monitoring_client = MonitoringClient(config)
+dbm_client = DbManagementClient(config)
 
 # Main Flow - start with Infra OCID to get name
 # Script pulls Infra Detail, VM Cluster Detail (storage info)
@@ -93,6 +90,18 @@ with open(temp_file_name, 'w', newline='') as csvfile:
                         end_time=f"{end_time.isoformat()}Z",
                         resolution="6h")
                 ).data
+                
+                cpu_count = None
+                try:
+                    # Get Param from DBM
+                    dbm_parameter_response = dbm_client.list_database_parameters(
+                        managed_database_id=db.id,
+                        name="cpu_min_count"
+                    ).data
+                    cpu_count = int(dbm_parameter_response.items[0].value)
+                    print(f"   Type: {dbm_parameter_response.database_type} CPU_Count: {dbm_parameter_response.items[0].value}")
+                except ServiceError as exc:
+                    print(f"   Failed to get details: {exc.status}, {exc.message}")
 
                 # Add and average the datapoints - probably a better way to do this...
 
@@ -103,10 +112,10 @@ with open(temp_file_name, 'w', newline='') as csvfile:
                     storage_used = sum / len(summarize_metrics_data_response[0].aggregated_datapoints)
 
                     #storage_used = summarize_metrics_data_response[0].aggregated_datapoints[0].value
-                    print(f'{storage_used:.2f}')
-                    csv_writer.writerow([cluster.id,cluster.display_name,db.id,db.db_unique_name,db.lifecycle_state,f"{storage_used:.2f}"])
+                    print(f'   {storage_used:.2f}')
+                    csv_writer.writerow([cluster.id,cluster.display_name,db.id,db.db_unique_name,db.lifecycle_state,f"{storage_used:.2f}",cpu_count if cpu_count else "n/a"])
                 else:
-                    csv_writer.writerow([cluster.id,cluster.display_name,db.id,db.db_unique_name,db.lifecycle_state,-1])
+                    csv_writer.writerow([cluster.id,cluster.display_name,db.id,db.db_unique_name,db.lifecycle_state,-1,cpu_count if cpu_count else "n/a"])
                 # Sleep a moment to give API some rest
                 time.sleep(.5)
 
