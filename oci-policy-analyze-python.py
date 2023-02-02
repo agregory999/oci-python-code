@@ -2,6 +2,7 @@
 from oci import config
 from oci import identity
 import argparse
+import json
 
 # Lists
 dynamic_group_statements = []
@@ -14,7 +15,7 @@ def print_statement(statement_tuple):
     a,b,c,d,e = statement_tuple
     print(f"Subject: {a}, Verb: {b}, Resource: {c}, Location: {d}, Condition: {e}")
 
-def parse_statement(statement, comp_string, comp_name):
+def parse_statement(statement, comp_string, policy):
     # Play with tuple and partition
     # (subject, verb, resource, location, condition)
     # Pass 1 - where condition
@@ -48,7 +49,7 @@ def parse_statement(statement, comp_string, comp_name):
             location = f"compartment {comp_string}:{sub_comp}"
 
     # Build tuple based on modified location
-    statement_tuple = (subject,verb,resource,location,condition)
+    statement_tuple = (subject,verb,resource,location,condition,f"{comp_string}", policy.name, policy.id, policy.compartment_id)
     return statement_tuple
     
 # Recursive Compartments / Policies
@@ -90,8 +91,13 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string, verbose
                 special_statements.append(statement)
                 continue
 
-            # Helper returns tuple
-            statement_tuple = parse_statement(statement=statement, comp_string=comp_string, comp_name=comp.name)
+            # Helper returns tuple with policy statement and lineage
+            statement_tuple = parse_statement(
+                statement=statement, 
+                comp_string=comp_string, 
+                policy=policy
+            )
+
             if statement_tuple[0] is None or statement_tuple[0] == "":
                 if verbose:
                     print(f"****Statement {statement} resulted in bad tuple: {statement_tuple}")
@@ -206,5 +212,23 @@ print(f"Total Service statement in tenancy: {len(service_statements)}")
 # Print Regular
 print("========Summary Reg==============")
 for index, statement in enumerate(regular_statements, start=1):
-    print(f"Statement #{index}: {statement}")
+    print(f"Statement #{index}: {statement} | Comp: {statement[5]} {statement[6]} {statement[7]}")
 print(f"Total Regular statement in tenancy: {len(regular_statements)}")
+
+# To file
+# Dictionary
+statements_list = []
+for i,s in enumerate(special_statements):
+    statements_list.append( {"type": "special", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
+for i,s in enumerate(dynamic_group_statements):
+    statements_list.append( {"type": "dynamic-group", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
+for i,s in enumerate(service_statements):
+    statements_list.append( {"type": "service", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
+for i,s in enumerate(regular_statements):
+    statements_list.append( {"type": "regular", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
+# Serializing json
+json_object = json.dumps(statements_list, indent=2)
+ 
+# Writing to sample.json
+with open("output.json", "w") as outfile:
+    outfile.write(json_object)

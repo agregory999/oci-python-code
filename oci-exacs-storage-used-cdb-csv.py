@@ -98,7 +98,7 @@ with open(temp_file_name, 'w', newline='') as csvfile:
                         managed_database_id=db.id,
                         name="cpu_min_count"
                     ).data
-                    cpu_count = int(dbm_parameter_response.items[0].value)
+                    cpu_count = float(dbm_parameter_response.items[0].value) if dbm_parameter_response and len(dbm_parameter_response.items) > 0 else None
                     print(f"   Type: {dbm_parameter_response.database_type} CPU_Count: {dbm_parameter_response.items[0].value}")
                 except ServiceError as exc:
                     print(f"   Failed to get details: {exc.status}, {exc.message}")

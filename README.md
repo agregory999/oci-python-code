@@ -40,6 +40,8 @@ The script attempts to parse each statement into a list of tuples.  Each tuple l
 
 `(Subject) (Verb) (Resource) (Location) (Conditions)`
 
+Ther script also outputs the result to a local file called `output.json`.  This can be used to run JQ commands for additional filtering.
+
 Tuples make it easier to filter.  The script supports filters via these parameters:
 - [-sf SUBJECTFILTER]
 - [-vf VERBFILTER]
@@ -49,6 +51,8 @@ Tuples make it easier to filter.  The script supports filters via these paramete
 The script starts wherever you tell it in the compartment hierarchy and recurses through all compartments.  To run it at the tenancy root, give `-o tenancy ocid` .  To start within a compartment hierarchy, pass in `-o compartment_ocid`.
 
 Optionally, if you use profiles in your OCI config (eg other than DEFAULT), pass in -pr/--profile to set that.  Omit if you only have a `DEFAULT` profile defined.
+
+FUTURE: This code couldbe put into OCI function that maintains a current policy DB in Autonomous DB, with ability to develop new policies as needed.
 
 ### Simple Examples
 ```
