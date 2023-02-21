@@ -53,6 +53,8 @@ with open(temp_file_name, 'w', newline='') as csvfile:
     # Set up CSV
     csv_writer = csv.writer(csvfile, delimiter='^',
                             quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    csv_writer.writerow(["VMC_OCID","VMC_NAME","CDB_OCID","CDB_NAME","CDB_LIFECYCLE","STORAGE_CDB","MIN_CPU_CDB","PDB_OCID","PDB_NAME","PDB_STORAGE","MIN_CPU_PDB"])
+
     # Get Infra
     try:
 
@@ -89,22 +91,39 @@ with open(temp_file_name, 'w', newline='') as csvfile:
                 cloud_vm_cluster_id=cdb.vm_cluster_id
             ).data
        
-            print(f"VMC: {vm_cluster.display_name} DB: {cdb.db_unique_name}, Status: {cdb.lifecycle_state}")
+            print(f"VMC: {vm_cluster.display_name} DB: {cdb.db_unique_name}, Status: {cdb.lifecycle_state} RO: {pdb.open_mode}")
 
+            # CDB Storage
             # Storage in use / Metric / XX day average of average storage used
             # StorageUsed[1d]{resourceId_database = "DB OCID"}.mean()
             end_time = datetime.now()
             start_time = end_time - timedelta(days = days_to_average)
-            summarize_metrics_data_response = monitoring_client.summarize_metrics_data(
+            cdb_summarize_metrics_data_response = monitoring_client.summarize_metrics_data(
                 compartment_id=comp_ocid,
                 summarize_metrics_data_details=SummarizeMetricsDataDetails(
-                    namespace="oci_database",
-                    query=f'StorageUsed[1d]{{resourceId_database ="{cdb.id}" }}.mean()',
+                    namespace="oracle_oci_database",
+                    query=f'StorageUsed[12h]{{resourceId="{cdb.id}" }}.max()',
                     start_time=f"{start_time.isoformat()}Z",
                     end_time=f"{end_time.isoformat()}Z"
                 )
             ).data
-            
+
+            # PDB Storage
+            # Storage in use / Metric / XX day average of average storage used
+            # StorageUsed[1d]{resourceId_database = "DB OCID"}.mean()
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days = days_to_average)
+            pdb_summarize_metrics_data_response = monitoring_client.summarize_metrics_data(
+                compartment_id=comp_ocid,
+                summarize_metrics_data_details=SummarizeMetricsDataDetails(
+                    namespace="oracle_oci_database",
+                    query=f'StorageUsed[12h]{{resourceId="{pdb.id}" }}.max()',
+                    start_time=f"{start_time.isoformat()}Z",
+                    end_time=f"{end_time.isoformat()}Z"
+                )
+            ).data
+
+            #print(f"Output PDB: {pdb_summarize_metrics_data_response}")
             pdb_cpu_count = None
             cdb_cpu_count = None
             error = ""
@@ -119,6 +138,8 @@ with open(temp_file_name, 'w', newline='') as csvfile:
             except ServiceError as exc:
                 print(f"   Failed to get details: {exc.status}, {exc.message}")
                 error += exc.message
+            except IndexError as exc:
+                print(f"   Failed to get details: {exc}")
             try:
                 # Get CDB Param from DBM
                 dbm_parameter_response = dbm_client.list_database_parameters(
@@ -130,21 +151,33 @@ with open(temp_file_name, 'w', newline='') as csvfile:
             except ServiceError as exc:
                 print(f"   Failed to get details: {exc.status}, {exc.message}")
                 error += exc.message
+            except IndexError as exc:
+                print(f"   Failed to get details: {exc}")
             # Add and average the datapoints - probably a better way to do this...
 
-            storage_used = -1
-            if summarize_metrics_data_response:
+            cdb_storage_used = -1
+            if cdb_summarize_metrics_data_response:
                 sum = 0
-                for dp in summarize_metrics_data_response[0].aggregated_datapoints:
+                for dp in cdb_summarize_metrics_data_response[0].aggregated_datapoints:
                     sum = sum + dp.value
-                storage_used = sum / len(summarize_metrics_data_response[0].aggregated_datapoints)
+                cdb_storage_used = sum / len(cdb_summarize_metrics_data_response[0].aggregated_datapoints)
 
                 #storage_used = summarize_metrics_data_response[0].aggregated_datapoints[0].value
-                print(f'   Storage (CDB {cdb.db_name}): {storage_used:.2f}')
+                print(f'   Storage (CDB {cdb.db_unique_name}): {cdb_storage_used:.2f}')
+            pdb_storage_used = -1
+            if pdb_summarize_metrics_data_response:
+                sum = 0
+                for dp in pdb_summarize_metrics_data_response[0].aggregated_datapoints:
+                    sum = sum + dp.value
+                pdb_storage_used = sum / len(pdb_summarize_metrics_data_response[0].aggregated_datapoints)
+
+                #storage_used = summarize_metrics_data_response[0].aggregated_datapoints[0].value
+                print(f'   Storage (PDB {pdb.pdb_name}): {pdb_storage_used:.2f}')
             # Sleep a moment to give API some rest
-            time.sleep(.1)
+            time.sleep(.2)
             # Write row to CSV
-            csv_writer.writerow([vm_cluster.id,vm_cluster.display_name,cdb.id,cdb.db_unique_name,cdb.lifecycle_state,f"{storage_used:.2f}",cdb_cpu_count if cdb_cpu_count else "n/a",pdb.id,pdb.pdb_name,pdb_cpu_count if pdb_cpu_count else "n/a",error])
+            #csv_writer.writerow([vm_cluster.id,vm_cluster.display_name,cdb.id,cdb.db_unique_name,cdb.lifecycle_state,f"{storage_used:.2f}",cdb_cpu_count if cdb_cpu_count else "n/a",pdb.id,pdb.pdb_name,pdb_cpu_count if pdb_cpu_count else "n/a",error])
+            csv_writer.writerow([vm_cluster.id,vm_cluster.display_name,cdb.id,cdb.db_unique_name,cdb.lifecycle_state,f"{cdb_storage_used:.2f}",cdb_cpu_count if cdb_cpu_count else "n/a",pdb.id,pdb.pdb_name,f"{pdb_storage_used:.2f}",pdb_cpu_count if pdb_cpu_count else "n/a"])
 
     except ServiceError as exc:
         print(f"Failed to get details: {exc}")

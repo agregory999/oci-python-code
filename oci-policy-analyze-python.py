@@ -137,8 +137,8 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string, verbose
 # Parse Arguments
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-parser.add_argument("-o", "--ocid", help="OCID of compartment or tenancy", required=True)
 parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
+parser.add_argument("-o", "--ocid", help="OCID of compartment (if not passed, will use tenancy OCID from profile)", default="TENANCY")
 parser.add_argument("-sf", "--subjectfilter", help="Filter all statement subjects by this text")
 parser.add_argument("-vf", "--verbfilter", help="Filter all verbs (inspect,read,use,manage) by this text")
 parser.add_argument("-rf", "--resourcefilter", help="Filter all resource (eg database or stream-family etc) subjects by this text")
@@ -153,6 +153,11 @@ resource_filter = args.resourcefilter
 location_filter = args.locationfilter
 
 config = config.from_file(profile_name=profile)
+if ocid == "TENANCY":
+    print(f'Using tenancy OCID from profile: {config["tenancy"]}')
+    ocid = config["tenancy"]
+
+# Create the OCI Client to use
 identity_client = identity.IdentityClient(config)
 
 # Initial Recursion
