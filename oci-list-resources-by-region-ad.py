@@ -75,3 +75,47 @@ try:
 
 except Exception as e:
     raise RuntimeError("\nError - " + str(e))
+
+
+for region in regions:
+  if region.region_name == "us-ashburn-1" or region.region_name == "us-sanjose-1":
+    instances = []
+    bootVolumes = []
+    blockVolumes = []
+    config["region"] = region.region_name
+    print(f"Region: {region.region_name}")
+    identity = oci.identity.IdentityClient(config)
+    print(f"Identity: {identity}")
+    compartment_id = config["tenancy"]
+    #print(f"Compartment ID: {compartment_id}")
+    try:
+      compartments = identity.list_compartments (config["tenancy"],compartment_id_in_subtree=True,lifecycle_state="ACTIVE").data
+    except Exception as e:
+      raise RuntimeError("\nError extracting compartments - " + str(e))
+      errorLog(f"RuntimeError: {e}\n {compartments}\n\n")
+    for compartment in compartments:
+      #print(f"  Compartment: {compartment.name}")
+      blockStorage = oci.core.BlockstorageClient(config)
+      print(f"  Compartment: {compartment.name}  - Region: {region.region_name}")
+      try:
+        instances = compute.list_instances(compartment.id,lifecycle_state="RUNNING").data
+        #print(f"    Instance: {instance.display_name}")
+      except Exception as e:
+        raise RuntimeError("\nError extracting instances - " + str(e))
+        errorLog(f"RuntimeError: {e}\n {instances}\n\n")
+      bootVolumes = blockStorage.list_boot_volumes(compartment_id=compartment.id).data
+      blockVolumes = blockStorage.list_volumes(compartment_id=compartment.id).data
+      for instance in instances:
+        failure = 0
+        defined_tags = []
+        windstreamTagsServer = []
+        windstreamTagsVolume = []       
+        try:
+          windstreamTagsServer = instance.defined_tags['Windstream_Tags']
+        except KeyError as e:
+          print("\nError - KeyError " + str(e))
+          failure = 1
+          continue
+        print(f"    Instance: {instance.display_name}")
+
+
