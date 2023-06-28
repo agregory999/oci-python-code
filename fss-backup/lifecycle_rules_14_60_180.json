@@ -43,7 +43,7 @@
         ]
       },
       "target": "objects",
-      "time-amount": 31,
+      "time-amount": 60,
       "time-unit": "DAYS"
     },
     {
@@ -58,7 +58,7 @@
         ]
       },
       "target": "previous-object-versions",
-      "time-amount": 31,
+      "time-amount": 60,
       "time-unit": "DAYS"
     },
     {
