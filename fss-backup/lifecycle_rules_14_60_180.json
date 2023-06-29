@@ -101,11 +101,13 @@
     {
       "action": "DELETE",
       "is-enabled": true,
-      "name": "delete-catchall-latest-180",
+      "name": "delete-older-monthly",
       "object-name-filter": {
         "exclusion-patterns": null,
         "inclusion-patterns": null,
-        "inclusion-prefixes": null
+        "inclusion-prefixes": [
+          "FSS-monthly"
+        ]
       },
       "target": "objects",
       "time-amount": 180,
