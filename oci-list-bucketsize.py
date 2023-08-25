@@ -24,9 +24,12 @@ TB = 1024 * 1024 * 1024 * 1024
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
 parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
+parser.add_argument("-t", "--threshold", help="Threshold in TB to show greater than, number", default=10, type=int)
 args = parser.parse_args()
 verbose = args.verbose
 profile = args.profile
+show_threshold = args.threshold
+
 
 # Create / Validate Config
 config = from_file(profile_name=profile)
@@ -71,15 +74,15 @@ try:
 
             buckets = object_storage.list_buckets(compartment_id=compartment.id,namespace_name=os_ns, limit=1000).data
             for bucket in buckets:
-                bucket_details = object_storage.get_bucket(namespace_name=os_ns, bucket_name=bucket.name, fields=["approximateSize"]).data
+                bucket_details = object_storage.get_bucket(namespace_name=os_ns, bucket_name=bucket.name, fields=["approximateSize","approximateCount"]).data
                 
                 # Add to counter
                 total_bytes += bucket_details.approximate_size
-                if verbose:
-                    print(f'  {"***" if bucket_details.approximate_size > 10 * TB else ""}Bucket Name: {bucket.name} Size: {sizeof_fmt(bucket_details.approximate_size)}')
-                else:
-                    if bucket_details.approximate_size > 10 * TB:
-                        print(f'  *** {compartment.name} / Bucket Name: {bucket.name} Size: {sizeof_fmt(bucket_details.approximate_size)}')
+                if verbose or bucket_details.approximate_size > show_threshold * TB:
+                    #print(f'  {"***" if bucket_details.approximate_size > show_threshold * TB else ""}Bucket Name: {bucket.name} Size: {sizeof_fmt(bucket_details.approximate_size)} Objects: {bucket_details.object_count}')
+                #else:
+                #    if bucket_details.approximate_size > 10 * TB:
+                    print(f'  *** {compartment.name} / Bucket Name: {bucket.name} Size: {sizeof_fmt(bucket_details.approximate_size)} Objects: {sizeof_fmt(bucket_details.approximate_count)}')
 
         # Summary Region
         print(f"Storage Total (Region): {sizeof_fmt(total_bytes)}")

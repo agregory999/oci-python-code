@@ -40,17 +40,25 @@ The script attempts to parse each statement into a list of tuples.  Each tuple l
 
 `(Subject) (Verb) (Resource) (Location) (Conditions)`
 
-Ther script also outputs the result to a local file called `output.json`.  This can be used to run JQ commands for additional filtering.
+Ther script also outputs the result to a local file called `output-ocid.json`.  This can be used to run JQ commands for additional filtering.
 
-Tuples make it easier to filter.  The script supports filters via these parameters:
+### Features
+
+*Caching* - To make it easier for large tenancies, if you want to run multiple filters or extractions, you can read the entire policy set from a cache set using `-c`.  By running the script, the cache is created or updated.  Subsequent runs with `-c` will attempt to load from the cache, so that filter commands are near instantaneous.
+
+*Output* - To write the filtered output to a JSON file, provide `-w`.  This will take whatever is filtered and put out to a JSON file for further analysis.
+
+*Filters* - The internal format that the script uses to parse statements is using tuples make it easier to filter.  The script supports filters via these parameters:
 - [-sf SUBJECTFILTER]
 - [-vf VERBFILTER]
 - [-rf RESOURCEFILTER]
 - [-lf LOCATIONFILTER]
 
-The script starts wherever you tell it in the compartment hierarchy and recurses through all compartments.  To run it at the tenancy root, give `-o tenancy ocid` .  To start within a compartment hierarchy, pass in `-o compartment_ocid`.
+The script starts wherever you tell it in the compartment hierarchy and recurses through all compartments.  To run it at the tenancy root, omit `-o` .  To start within a compartment hierarchy, pass in `-o compartment_ocid`.
 
 Optionally, if you use profiles in your OCI config (eg other than DEFAULT), pass in -pr/--profile to set that.  Omit if you only have a `DEFAULT` profile defined.
+
+
 
 FUTURE: This code couldbe put into OCI function that maintains a current policy DB in Autonomous DB, with ability to develop new policies as needed.
 
@@ -72,11 +80,56 @@ The flags below can be used independently or in tandem:
 ```
 # Filter statements by group ABC and verb manage
 python3 oci-policy-analyze-python.py -o ocid1.compartment.oc1..zzzzzzzzzz -sf ABC -vf manage
+
 # Filter alternate OCI profile tenancy level by compartment DEF
 python3 oci-policy-analyze-python.py --profile CUSTOMER -o ocid1.tenancy.oc1..zzzzzzzzz -lf DEF
 
+# Multiple filters from a cached set of policies (find all policy statements that allow MANAGE and apply to TENANCY)
+python3 ./oci-policy-analyze-python.py --profile CUSTOMER -c -lf tenancy -vf manage
 ```
 
+### Writing out to local file
+Use of 4 filters and `-w` to create JSON extract:
+```
+# Multiple filters from a cached set of policies (find all policy statements that allow MANAGE and apply to TENANCY)
+python3 ./oci-policy-analyze-python.py --profile CUSTOMER -c -lf tenancy -sf performancemonitor -vf manage -rf metrics -w
+```
+
+Produces output like this:
+```json
+[
+  {
+    "type": "regular",
+    "subject": "group 'dbperformancemonitor'",
+    "verb": "manage",
+    "resource": "metrics",
+    "location": "tenancy",
+    "conditions": "any {target.compartment.name = 'database', target.compartment.name = 'non_production_database', target.compartment.name = 'nonprod_exacs', target.compartment.name = 'production_database', target.compartment.name = 'prod_exacs'}",
+    "lineage": {
+      "policy-compartment-ocid": "ocid1.tenancy.oc1..xxx",
+      "policy-relative-hierarchy": "",
+      "policy-name": "DBMgmt_User_Policy",
+      "policy-ocid": "ocid1.policy.oc1..xxx",
+      "policy-text": "Allow group 'DBPerformanceMonitor' to manage metrics in tenancy where any {target.compartment.name = 'Database', target.compartment.name = 'Non_Production_Database', target.compartment.name = 'NonProd_Exacs', target.compartment.name = 'Production_Database', target.compartment.name = 'Prod_Exacs'}"
+    }
+  },
+  {
+    "type": "regular",
+    "subject": "group 'dbperformancemonitor'",
+    "verb": "manage",
+    "resource": "metrics",
+    "location": "tenancy",
+    "conditions": "any {target.compartment.name = 'database', target.compartment.name = 'non_production_database', target.compartment.name = 'nonprod_exacs', target.compartment.name = 'production_database', target.compartment.name = 'prod_exacs'}",
+    "lineage": {
+      "policy-compartment-ocid": "ocid1.tenancy.oc1..xxx",
+      "policy-relative-hierarchy": "",
+      "policy-name": "DBPerformanceMonitor_Policy",
+      "policy-ocid": "ocid1.policy.oc1..xxx",
+      "policy-text": "Allow group 'DBPerformanceMonitor' to manage metrics in tenancy where any {target.compartment.name = 'Database', target.compartment.name = 'Non_Production_Database', target.compartment.name = 'NonProd_Exacs', target.compartment.name = 'Production_Database', target.compartment.name = 'Prod_Exacs'}"
+    }
+  }
+]
+```
 ## OCI Metrics Alarm History
 
 Script to show metrics history and specifically call out when a metric goes over and under a specific threshold.  Alarms that watch multiple metric streams may stay in FIRING state (not good) for a long time.  This doesn't provide details of when each stream crossed the threshold set by the alarm (over or under).  This script does that.  It looks at XX days of history, takes a metrics query, and a threshold value (similar to alarm).  Then it pulls all data and only shows when it exceeds or falls below the thresold.

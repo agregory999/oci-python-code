@@ -3,6 +3,7 @@ from oci import config
 from oci import identity
 import argparse
 import json
+import os
 
 # Lists
 dynamic_group_statements = []
@@ -49,11 +50,11 @@ def parse_statement(statement, comp_string, policy):
             location = f"compartment {comp_string}:{sub_comp}"
 
     # Build tuple based on modified location
-    statement_tuple = (subject,verb,resource,location,condition,f"{comp_string}", policy.name, policy.id, policy.compartment_id)
+    statement_tuple = (subject,verb,resource,location,condition,f"{comp_string}", policy.name, policy.id, policy.compartment_id, statement)
     return statement_tuple
     
 # Recursive Compartments / Policies
-def getNestedCompartment(identity_client, comp_ocid, level, comp_string, verbose):
+def getNestedCompartment(identity_client, comp_ocid, level, max_level, comp_string, verbose):
 
     # Print something if not verbose
     if not verbose:
@@ -109,6 +110,10 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string, verbose
             else:
                 regular_statements.append(statement_tuple)
 
+    if level == max_level:
+        # return, stop
+        return
+    
     # Where are we? Do we need to recurse?
     list_compartments_response = identity_client.list_compartments(
         compartment_id=comp_ocid,
@@ -128,9 +133,9 @@ def getNestedCompartment(identity_client, comp_ocid, level, comp_string, verbose
        
         # Recurse
         if comp_string == "":
-            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, comp_string=comp_string + comp.name, verbose=verbose)
+            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, max_level=max_level, comp_string=comp_string + comp.name, verbose=verbose)
         else:
-            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, comp_string=comp_string + ":" + comp.name, verbose=verbose)
+            getNestedCompartment(identity_client=identity_client, comp_ocid=comp.id, level=level+1, max_level=max_level, comp_string=comp_string + ":" + comp.name, verbose=verbose)
 
 # Main Code
 
@@ -143,14 +148,20 @@ parser.add_argument("-sf", "--subjectfilter", help="Filter all statement subject
 parser.add_argument("-vf", "--verbfilter", help="Filter all verbs (inspect,read,use,manage) by this text")
 parser.add_argument("-rf", "--resourcefilter", help="Filter all resource (eg database or stream-family etc) subjects by this text")
 parser.add_argument("-lf", "--locationfilter", help="Filter all location (eg compartment name) subjects by this text")
+parser.add_argument("-m", "--maxlevel", help="Max recursion level (0 is root only)",type=int,default=6)
+parser.add_argument("-c", "--usecache", help="Load from local cache (if it exists)", action="store_true")
+parser.add_argument("-w", "--writejson", help="Write filtered output to JSON", action="store_true")
 args = parser.parse_args()
 verbose = args.verbose
+use_cache = args.usecache
 ocid = args.ocid
 profile = args.profile
 sub_filter = args.subjectfilter
 verb_filter = args.verbfilter
 resource_filter = args.resourcefilter
 location_filter = args.locationfilter
+max_level = args.maxlevel
+write_json_output = args.writejson
 
 config = config.from_file(profile_name=profile)
 if ocid == "TENANCY":
@@ -160,11 +171,33 @@ if ocid == "TENANCY":
 # Create the OCI Client to use
 identity_client = identity.IdentityClient(config)
 
-# Initial Recursion
-level = 0
-print("========Enter Recursion==============")
-getNestedCompartment(identity_client=identity_client, comp_ocid=ocid, level=level, comp_string="", verbose=verbose)
-print("\n========Exit Recursion==============")
+# Load from cache (if exists)
+if use_cache:
+    print("Loading Policy statements from cache")
+
+    if os.path.isfile(f'./.policy-dg-cache-{ocid}.dat'):
+        with open(f'./.policy-dg-cache-{ocid}.dat', 'r') as filehandle:
+            dynamic_group_statements = json.load(filehandle)
+    if os.path.isfile(f'.policy-svc-cache-{ocid}.dat'):
+        with open(f'./.policy-svc-cache-{ocid}.dat', 'r') as filehandle:
+            service_statements = json.load(filehandle)
+    if os.path.isfile(f'.policy-statement-cache-{ocid}.dat'):
+        with open(f'./.policy-statement-cache-{ocid}.dat', 'r') as filehandle:
+            regular_statements = json.load(filehandle)
+else:        
+    # Run Recursion
+    level = 0
+    print("========Enter Recursion==============")
+    getNestedCompartment(identity_client=identity_client, comp_ocid=ocid, level=level, max_level=max_level, comp_string="", verbose=verbose)
+    print("\n========Exit Recursion==============")
+
+# Write to local cache (per type)
+with open(f'.policy-dg-cache-{ocid}.dat', 'w') as filehandle:
+    json.dump(dynamic_group_statements, filehandle)
+with open(f'.policy-svc-cache-{ocid}.dat', 'w') as filehandle:
+    json.dump(service_statements, filehandle)
+with open(f'.policy-statement-cache-{ocid}.dat', 'w') as filehandle:
+    json.dump(regular_statements, filehandle)
 
 # Perform Filtering
 if sub_filter:
@@ -205,35 +238,36 @@ print(f"Total Special statement in tenancy: {len(special_statements)}")
 # Print Dynamic Groups
 print("========Summary DG==============")
 for index, statement in enumerate(dynamic_group_statements, start=1):
-    print(f"Statement #{index}: {statement}")
+    print(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
 print(f"Total Service statement in tenancy: {len(dynamic_group_statements)}")
 
 # Print Service
 print("========Summary SVC==============")
 for index, statement in enumerate(service_statements, start=1):
-    print(f"Statement #{index}: {statement}")
+    print(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
 print(f"Total Service statement in tenancy: {len(service_statements)}")
 
 # Print Regular
 print("========Summary Reg==============")
 for index, statement in enumerate(regular_statements, start=1):
-    print(f"Statement #{index}: {statement} | Comp: {statement[5]} {statement[6]} {statement[7]}")
+    print(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
 print(f"Total Regular statement in tenancy: {len(regular_statements)}")
 
-# To file
-# Dictionary
-statements_list = []
-for i,s in enumerate(special_statements):
-    statements_list.append( {"type": "special", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
-for i,s in enumerate(dynamic_group_statements):
-    statements_list.append( {"type": "dynamic-group", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
-for i,s in enumerate(service_statements):
-    statements_list.append( {"type": "service", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
-for i,s in enumerate(regular_statements):
-    statements_list.append( {"type": "regular", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7]}})
-# Serializing json
-json_object = json.dumps(statements_list, indent=2)
- 
-# Writing to sample.json
-with open("output.json", "w") as outfile:
-    outfile.write(json_object)
+# To output file if required
+if write_json_output:
+    # Empty Dictionary
+    statements_list = []
+    for i,s in enumerate(special_statements):
+        statements_list.append( {"type": "special", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}})
+    for i,s in enumerate(dynamic_group_statements):
+        statements_list.append( {"type": "dynamic-group", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}})
+    for i,s in enumerate(service_statements):
+        statements_list.append( {"type": "service", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}})
+    for i,s in enumerate(regular_statements):
+        statements_list.append( {"type": "regular", "subject": s[0], "verb": s[1], "resource": s[2], "location":s[3], "conditions": s[4], "lineage":{"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],"policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}})
+    # Serializing json
+    json_object = json.dumps(statements_list, indent=2)
+    
+    # Writing to sample.json
+    with open(f"policyoutput-{ocid}.json", "w") as outfile:
+        outfile.write(json_object)
