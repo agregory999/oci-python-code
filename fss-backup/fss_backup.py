@@ -90,7 +90,7 @@ def ensure_temporary_mount():
             # Raise because if we cannot, we should kill the script immediately
             raise
       
-def ensure_backup_bucket(oss_client, bucket):
+def ensure_backup_bucket(oss_client, bucket) -> bool:
     """Check bucket status - create if necessary"""
     try:
         object_storage_client.get_bucket(namespace_name=namespace_name,bucket_name=bucket)
@@ -100,16 +100,24 @@ def ensure_backup_bucket(oss_client, bucket):
         if verbose:
             print(f"Bucket {bucket} not found - creating", flush=True)
         if not dry_run:
-            oss_client.create_bucket(namespace_name=namespace_name,
-                                                create_bucket_details = oci.object_storage.models.CreateBucketDetails(
-                                                    name=bucket,
-                                                    compartment_id=oss_compartment_ocid,
-                                                    storage_tier="Standard",
-                                                    object_events_enabled=True,
-                                                    versioning="Enabled")
-                                                )
+            # Fix for bucket creation error - try and catch oci.exceptions.ServiceError
+            try:
+                # Create a new bucket
+                oss_client.create_bucket(namespace_name=namespace_name,
+                                                    create_bucket_details = oci.object_storage.models.CreateBucketDetails(
+                                                        name=bucket,
+                                                        compartment_id=oss_compartment_ocid,
+                                                        storage_tier="Standard",
+                                                        object_events_enabled=True,
+                                                        versioning="Enabled")
+                                                    )
+            except oci.exceptions.ServiceError as ex:
+                print(f"Unable to create backup bucket {bucket}: {ex.message}")
+                return False
         else:
             print(f"Dry Run: Would have created bucket {bucket} in compartment {oss_compartment_ocid}", flush=True)                                    
+        # True means we are ok to proceed
+        return True
 
 def get_suitable_export(file_storage_client, virtual_network_client, mt_ocid, fs_ocid):
     """Grab the list of exports from MT and iterate. Pick one with the right mount IP and return it"""
@@ -275,8 +283,14 @@ for share in shares.data:
         continue
 
     # Ensure that the bucket is there
-    ensure_backup_bucket(oss_client=object_storage_client,bucket=backup_bucket_name)
 
+    bucket_exists = ensure_backup_bucket(oss_client=object_storage_client,bucket=backup_bucket_name)
+
+    # For for no available bucket
+    if not bucket_exists:
+        # Move on
+        print(f"Bucket {backup_bucket_name} is not available for share {share.display_name}. Continuing.")
+        continue
     # Try mount and rclone, it not, clean up snapshot
     try:
         # Call the helper to get export path and mount
