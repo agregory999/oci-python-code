@@ -9,8 +9,11 @@
 # Only import required code from OCI
 from oci import config
 from oci.exceptions import ClientError,ServiceError
+from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
+from oci import retry
+
+# OCI Clients and models (import as necessary)
 from oci.database import DatabaseClient
-from oci.database.models import DatabaseSummary
 
 # Additional imports
 import argparse   # Argument Parsing
@@ -20,31 +23,52 @@ import logging    # Python Logging
 parser = argparse.ArgumentParser()
 parser.add_argument("-v", "--verbose", help="Increased Verbosity, boolean", action="store_true")
 parser.add_argument("-pr", "--profile", help="Named Config Profile, from OCI Config", default="DEFAULT")
+parser.add_argument("-ip", "--instanceprincipal", help="Use Instance Principal Auth - negates --profile", action="store_true")
+parser.add_argument("-ipr", "--region", help="Use Instance Principal with alt region")
 parser.add_argument("-o", "--compartmentocid", help="Compartment OCID, required", required=True)
-parser.add_argument("-t", "--valuewithtype", help="Value with type", type=int)
 
 args = parser.parse_args()
 verbose = args.verbose  # Boolean
 profile = args.profile  # String
+use_instance_principals = args.instanceprincipal # Attempt to use instance principals (OCI VM)
+region = args.region # Region to use with Instance Principal, if not default
 comp_ocid = args.compartmentocid # String
-frame_tag = args.someothervalue # String with default value if not provided
-some_int = args.valuewithtype # int
 
 # Logging Setup
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-logger = logging.getLogger('script-name')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(threadName)s] %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 if verbose:
     logger.setLevel(logging.DEBUG)
 
 logger.info(f'Using profile {profile} with Logging level {"DEBUG" if verbose else "INFO"}')
-logger.debug(f"debug test - some_int: {some_int}")
+logger.debug(f"debug test - compartment OCID: {comp_ocid}")
 
 # PHASE 2 - Creation of OCI Client(s) 
 
 # Connect to OCI with DEFAULT or defined profile
 try:
-    config = config.from_file(profile_name=profile)
-    logger.debug(f"Profile Detail: {config}")
+
+   # Client creation
+    if use_instance_principals:
+        logger.info(f"Using Instance Principal Authentication")
+
+        signer = InstancePrincipalsSecurityTokenSigner()
+        config_ip = {}
+        if region:
+            config_ip={"region": region}
+            logger.info(f"Changing region to {region}")
+
+        # Example of client
+        database_client = DatabaseClient(config=config_ip, signer=signer, retry_strategy=retry.DEFAULT_RETRY_STRATEGY)
+
+    else:
+        # Use a profile (must be defined)
+        logger.info(f"Using Profile Authentication: {profile}")
+        config = config.from_file(profile_name=profile)
+
+        # Create the OCI Client to use
+        database_client = DatabaseClient(config, retry_strategy=retry.DEFAULT_RETRY_STRATEGY)
+
 except ClientError as ex:
     logger.critical(f"Failed to connect to OCI: {ex}")
 
@@ -55,7 +79,7 @@ db_client = DatabaseClient(config)
 
 # Get PDBs Example
 try:
-    databases = db_client.list_pluggable_databases(
+    databases = database_client.list_pluggable_databases(
         compartment_id=comp_ocid, 
         limit=1000
     ).data # List of DatabaseSummary
