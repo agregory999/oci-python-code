@@ -24,6 +24,7 @@ from oci.database.models import UpdateAutonomousDatabaseDetails
 from oci.resource_search import ResourceSearchClient
 from oci.resource_search.models import StructuredSearchDetails, ResourceSummary
 from oci.exceptions import ServiceError
+from oci.exceptions import ConfigFileNotFound
 
 import oci
 
@@ -41,7 +42,7 @@ def wait_for_available(db_id: str, start:bool):
     if start:
         if db.lifecycle_state == "STOPPED":
             # Start first
-            logger.info(f'{"DRYRUN: " if dryrun else ""}Starting Autonomous DB: {db.display_name}')
+            logger.debug(f'{"DRYRUN: " if dryrun else ""}Starting Autonomous DB: {db.display_name}')
             if dryrun:
                 return
             database_client.start_autonomous_database(db.id)
@@ -173,7 +174,7 @@ def database_work(db_id: str):
             logger.info(f'>>>{"DRYRUN: " if dryrun else ""}Scale Storage DB: {db.display_name} from {db.data_storage_size_in_tbs} TB to {new_storage_gb} GB (auto-scale)')
 
             # Waiting for AVAILABLE
-            wait_for_available(dryrun=dryrun, database_client=database_client, db_id=db.id, start=True)
+            wait_for_available(db_id=db.id, start=True)
 
             # Actual scaling (2 ECPU, auto-scale, Storage auto-scale)
             if not dryrun:
@@ -319,14 +320,19 @@ if __name__ == "__main__":
         search_client = ResourceSearchClient(config=config_ip, signer=signer)
     else:
         # Use a profile (must be defined)
-        logger.info(f"Using Profile Authentication: {profile}")
-        config = config.from_file(profile_name=profile)
+        try:
+            logger.info(f"Using Profile Authentication: {profile}")
+            config = config.from_file(profile_name=profile)
 
-        # Create the OCI Client to use
-        database_client = database.DatabaseClient(config, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
-        search_client = ResourceSearchClient(config)
+            # Create the OCI Client to use
+            database_client = database.DatabaseClient(config, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
+            search_client = ResourceSearchClient(config)
+        except ConfigFileNotFound as exc:
+            logger.fatal(f"Unable to use Profile Authentication: {exc}")
+            exit(1)
 
-    # Main routine
+    # Main routine:q
+        
     # Grab all ATP Serverless
     # Loop through
     # Ensure:
@@ -354,10 +360,9 @@ if __name__ == "__main__":
         results = executor.map(database_work, db_ocids)
         logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
     
-    # Write to file if desired
-    datestring = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
-
+    # Write to file if desired, else just print
     if output_json:
+        datestring = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
         filename = f'oci-atp-scale-down-{datestring}.json'
         with open(filename,"w") as outfile:
 
@@ -367,5 +372,5 @@ if __name__ == "__main__":
         logging.info(f"Script complete - wrote JSON to {filename}.")
     else:
         for result in results:
-            logger.info(f"Result: {result}")
+            logger.debug(f"Result: {result}")
 

@@ -23,6 +23,7 @@ from oci.database.models import UpdateAutonomousDatabaseDetails
 from oci.resource_search import ResourceSearchClient
 from oci.resource_search.models import StructuredSearchDetails
 from oci.exceptions import ServiceError
+from oci.exceptions import ConfigFileNotFound
 
 import oci
 
@@ -258,6 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--dryrun", help="Dry Run - no action", action="store_true")
     parser.add_argument("-t", "--threads", help="Concurrent Threads (def=5)", type=int, default=5)
     parser.add_argument("-r", "--retention", help="Days of backup retention (def=14)", type=int, default=14)
+    parser.add_argument("-w", "--writejson", help="output json", action="store_true")
 
     args = parser.parse_args()
     verbose = args.verbose
@@ -267,10 +269,11 @@ if __name__ == "__main__":
     dryrun = args.dryrun
     threads = args.threads
     backup_retention = args.retention
+    output_json = args.writejson
 
     # Logging Setup
     logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(threadName)s] %(levelname)s %(message)s')
-    logger = logging.getLogger('oci-scale-atp')
+    logger = logging.getLogger('oci-convert-adw')
     if verbose:
         logger.setLevel(logging.DEBUG)
 
@@ -290,12 +293,16 @@ if __name__ == "__main__":
 
     else:
         # Use a profile (must be defined)
-        logger.info(f"Using Profile Authentication: {profile}")
-        config = config.from_file(profile_name=profile)
+        try:
+            logger.info(f"Using Profile Authentication: {profile}")
+            config = config.from_file(profile_name=profile)
 
-        # Create the OCI Client to use
-        database_client = database.DatabaseClient(config, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
-        search_client = ResourceSearchClient(config)
+            # Create the OCI Client to use
+            database_client = database.DatabaseClient(config, retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
+            search_client = ResourceSearchClient(config)
+        except ConfigFileNotFound as exc:
+            logger.fatal(f"Unable to use Profile Authentication: {exc}")
+            exit(1)
 
     # Main routine
     # Grab all ADW serverless
@@ -325,14 +332,18 @@ if __name__ == "__main__":
     with ThreadPoolExecutor(max_workers = threads, thread_name_prefix="thread") as executor:
         results = executor.map(database_work, db_ocids)
         logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
-    
-    # Write to file
-    datestring = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
-    filename = f'oci-adw-convert-ecpu-{datestring}.json'
-    with open(filename,"w") as outfile:
 
+    # Write to file if desired, else just print
+    if output_json:
+        datestring = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
+        filename = f'oci-adw-convert-{datestring}.json'
+        with open(filename,"w") as outfile:
+
+            for result in results:
+                outfile.write(json.dumps(result, indent=2))
+
+        logging.info(f"Script complete - wrote JSON to {filename}.")
+    else:
         for result in results:
-            logger.info(f"Result: {result}")
-            outfile.write(json.dumps(result, indent=2))
+            logger.debug(f"Result: {result}")
 
-    logging.info(f"Script complete - wrote JSON to {filename}.")
