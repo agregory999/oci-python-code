@@ -19,7 +19,7 @@ from oci.identity.models import UpdateDynamicGroupDetails
 from oci.core import ComputeClient
 from oci.retry import DEFAULT_RETRY_STRATEGY
 from oci.database import DatabaseClient
-from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
+from oci.auth.signers import InstancePrincipalsSecurityTokenSigner, ResourcePrincipalsFederationSigner
 from oci import pagination 
 from oci.exceptions import ServiceError
 
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 
     if verbose:
         logger.setLevel(logging.DEBUG)
-        logging.getLogger('oci._vendor.urllib3.connectionpool').setLevel(logger.info)
+        # logging.getLogger('oci._vendor.urllib3.connectionpool').setLevel(logging.info)
 
     logger.info(f'Using profile {profile} with Logging level {"DEBUG" if verbose else "INFO"}')
 
@@ -158,6 +158,12 @@ if __name__ == "__main__":
     # Print what we have (if verbose)
     for i, dg in enumerate(dynamic_groups):
         logger.debug(f'Found Dynamic Group {i}: {dg.name} {dg.matching_rule}')
+
+        # TEMP DELETE
+        if 'ocid1.compartment.oc1..aaaaaaaaw4hsuu67pfgyo5cbmhsh2savfywbae7ov4bb7saroeydkgviecbq' in dg.matching_rule:
+            logger.info(f"Rule ( {dg.name} ): {dg.matching_rule}")
+        else:
+            continue
 
         # Pull Tags
         current_tags = dg.freeform_tags
