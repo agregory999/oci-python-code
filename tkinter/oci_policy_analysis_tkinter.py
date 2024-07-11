@@ -20,13 +20,39 @@ import datetime
 import uuid
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock, Thread
 
+lock = Lock()
+loaded = 0
+to_load = 0
+
+def progress_indicator(future):
+    global lock, loaded, to_load
+
+    # obtain the lock
+    with lock:
+        # Increase loaded
+        loaded += 1
+
+        # Figure completion
+        comp_step = int(loaded / to_load * 100)
+        logger.info(f"Completed {loaded} of {to_load} for a step of {comp_step}")
+
+        # report progress
+        #print(f'{future} completed',flush=True)
+        #progressbar.set(comp_step)
+        progressbar_val.set(comp_step)
+
+ 
 class PolicyAnalysis:
 
     dynamic_group_statements = []
     service_statements = []
     regular_statements = []
     special_statements = []
+
+    # Default threads
+    threads = 5
 
     # tenancy_ocid, identity_client recursion
     def __init__(self, verbose: bool):
@@ -37,23 +63,33 @@ class PolicyAnalysis:
         if verbose:
             self.logger.setLevel(logging.DEBUG)
 
-    def initialize_client(self, profile: str):
-        self.logger.info(f"Using Profile Authentication: {profile}")
-        try:
-            self.config = config.from_file(profile_name=profile)
-            self.logger.info(f'Using tenancy OCID from profile: {self.config["tenancy"]}')
-            self.tenancy_ocid = self.config["tenancy"]
+    def initialize_client(self, profile: str, use_instance_principal: bool) -> bool:
+        if use_instance_principal:
+            self.logger.info(f"Using Instance Principal Authentication")
+            try:
+                signer = InstancePrincipalsSecurityTokenSigner()
+                
+                # Create the OCI Client to use
+                self.identity_client = IdentityClient(config={}, signer=signer, retry_strategy=DEFAULT_RETRY_STRATEGY)
+                self.tenancy_ocid = signer.tenancy_id
+            except Exception as exc:
+                self.logger.fatal(f"Unable to use IP Authentication: {exc}")
+                return False 
+        else:
+            self.logger.info(f"Using Profile Authentication: {profile}")
+            try:
+                self.config = config.from_file(profile_name=profile)
+                self.logger.info(f'Using tenancy OCID from profile: {self.config["tenancy"]}')
 
-            # Create the OCI Client to use
-            self.identity_client = IdentityClient(self.config, retry_strategy=DEFAULT_RETRY_STRATEGY)
-        except ConfigFileNotFound as exc:
-            self.logger.fatal(f"Unable to use Profile Authentication: {exc}")
-        # Set up recursion
-        self.recursion = True
-        self.threads = 8
-
-        self.logger.info(f"Recursion: {self.recursion}, Threads: {self.threads}")
-       
+                # Create the OCI Client to use
+                self.identity_client = IdentityClient(self.config, retry_strategy=DEFAULT_RETRY_STRATEGY)
+                self.tenancy_ocid = self.config["tenancy"]
+            except ConfigFileNotFound as exc:
+                self.logger.fatal(f"Unable to use Profile Authentication: {exc}")
+                return False
+        self.logger.info(f"Set up Identity Client for tenancy: {self.tenancy_ocid}")
+        return True
+    
     # Print Statement
     def print_statement(self, statement_tuple):
         a, b, c, d, e = statement_tuple
@@ -165,12 +201,13 @@ class PolicyAnalysis:
                 else:
                     self.regular_statements.append(statement_tuple)
 
-    def load_policies_from_client(self, from_cache: bool):
+
+    def load_policies_from_client(self, use_cache: bool, use_recursion: bool) -> bool:
         # Requirements
         # Logger (self)
         # IdentityClient (self)
 
-        if from_cache:
+        if use_cache:
             self.logger.info(f"---Starting Policy Load for tenant: {self.tenancy_ocid} from cached files---")
             if os.path.isfile(f'./.policy-special-cache-{self.tenancy_ocid}.dat'):
                 with open(f'./.policy-special-cache-{self.tenancy_ocid}.dat', 'r') as filehandle:
@@ -186,7 +223,7 @@ class PolicyAnalysis:
                     self.regular_statements = json.load(filehandle)
         else:
             # If set from main() it is ok, otherwise take from function call
-            self.logger.info(f"---Starting Policy Load for tenant: {self.tenancy_ocid} with recursion {self.recursion} and {self.threads} threads---")
+            self.logger.info(f"---Starting Policy Load for tenant: {self.tenancy_ocid} with recursion {use_recursion} and {self.threads} threads---")
 
             # Load the policies
             # Start with list of compartments
@@ -196,7 +233,7 @@ class PolicyAnalysis:
             root_comp = self.identity_client.get_compartment(compartment_id=self.tenancy_ocid).data 
             comp_list.append(root_comp)
 
-            if self.recursion:
+            if use_recursion:
                 # Get all compartments (we don't know the depth of any), tenancy level
                 # Using the paging API
                 paginated_response = pagination.list_call_get_all_results(
@@ -209,10 +246,20 @@ class PolicyAnalysis:
                     limit=1000)
                 comp_list.extend(paginated_response.data)
 
-            self.logger.info(f'Loaded {len(comp_list)} Compartments.  {"Using recursion" if self.recursion else "No Recursion, only root-level policies"}')
+            self.logger.info(f'Loaded {len(comp_list)} Compartments.  {"Using recursion" if use_recursion else "No Recursion, only root-level policies"}')
+            
+            # We know the compartment count now - set up progress
+            global loaded, to_load
+            to_load = len(comp_list)
+
             with ThreadPoolExecutor(max_workers = self.threads, thread_name_prefix="thread") as executor:
-                results = executor.map(self.load_policies, comp_list)
+                # results = executor.map(self.load_policies, comp_list)
+                results = [executor.submit(self.load_policies, c) for c in comp_list]
                 self.logger.info(f"Kicked off {self.threads} threads for parallel execution - adjust as necessary")
+
+                for future in results:
+                    future.add_done_callback(progress_indicator)
+
             for res in results:
                 self.logger.debug(f"Result: {res}")
             self.logger.info(f"---Finished Policy Load from client---")
@@ -227,6 +274,9 @@ class PolicyAnalysis:
                 json.dump(self.service_statements, filehandle)
             with open(f'.policy-statement-cache-{self.tenancy_ocid}.dat', 'w') as filehandle:
                 json.dump(self.regular_statements, filehandle)
+        
+        # Return true to incidate success
+        return True
 
     def get_policy_counts(self):
         return (len(self.special_statements), len(self.regular_statements))
@@ -245,14 +295,36 @@ def initialize_client():
     policy_analysis.initialize_client(profile.get())
     logger.info(f"initialized clients: {profile.get()}")
 
-def load_policy_analysis_from_client():
-
+def load_policy_analysis_thread():
+    logger.info(f"Loading via cache: {use_cache.get()}")
     # Load class
-    policy_analysis.load_policies_from_client(from_cache=use_cache.get())
+    success = policy_analysis.load_policies_from_client(use_cache=use_cache.get(),
+                                              use_recursion=True)
+    
+    if success:
+        # Light up filter widgets
+        entry_subj.config(state=tk.NORMAL)
+        entry_loc.config(state=tk.NORMAL)
+        entry_res.config(state=tk.NORMAL)
+        entry_verb.config(state=tk.NORMAL)
+        btn_update.config(state=tk.ACTIVE)
 
-    # Counts
-    counts = policy_analysis.get_policy_counts()
-    #logger.info(f"Loaded Policies: {counts[0]}")
+def load_policy_analysis_from_client():
+    
+    # Initialize client
+    policy_analysis.initialize_client(profile.get(), 
+                                      use_instance_principal=use_instance_principal.get())
+
+    # Move Progress bar
+    progressbar.step(2)
+
+    #progressbar_val.set(comp_step)
+
+    # Start background thread to load policies
+    Thread(target=load_policy_analysis_thread).start()
+
+    # Move Progress bar to completed
+    progressbar_val.set(0.0)
 
     # Display
     update_output()
@@ -260,7 +332,14 @@ def load_policy_analysis_from_client():
 def select_instance_principal():
     # Update variable in class
     # Disable UI for selection of profile
-    pass
+    if use_instance_principal.get():
+        logger.info("Using Instance Principal - disable profile")
+        input_profile.config(state=tk.DISABLED)
+    else:
+        logger.info("Using Config")
+        input_profile.config(state=tk.ACTIVE)
+
+
 
 def update_output():
 
@@ -273,6 +352,9 @@ def update_output():
     # Apply Filters
     subj_filter = entry_subj.get()
     verb_filter = entry_verb.get()
+    resource_filter = entry_res.get()
+    location_filter = entry_loc.get()
+
     if subj_filter:
         logger.info(f"Filtering subject: {subj_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
         dynamic_group_statements = list(filter(lambda statement: subj_filter.casefold() in statement[0].casefold(), dynamic_group_statements))
@@ -287,19 +369,19 @@ def update_output():
         regular_statements = list(filter(lambda statement: verb_filter.casefold() in statement[1].casefold(), regular_statements))
         logger.info(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
-    # if resource_filter:
-    #     logger.info(f"Filtering resource: {resource_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    #     dynamic_group_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(), dynamic_group_statements))
-    #     service_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(), service_statements))
-    #     regular_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(), regular_statements))
-    #     logger.info(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+    if resource_filter:
+        logger.info(f"Filtering resource: {resource_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+        dynamic_group_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(), dynamic_group_statements))
+        service_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(), service_statements))
+        regular_statements = list(filter(lambda statement: resource_filter.casefold() in statement[2].casefold(), regular_statements))
+        logger.info(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
-    # if location_filter:
-    #     logger.info(f"Filtering location: {location_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    #     dynamic_group_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(), dynamic_group_statements))
-    #     service_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(), service_statements))
-    #     regular_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(), regular_statements))
-    #     logger.info(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+    if location_filter:
+        logger.info(f"Filtering location: {location_filter}. Before: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
+        dynamic_group_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(), dynamic_group_statements))
+        service_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(), service_statements))
+        regular_statements = list(filter(lambda statement: location_filter.casefold() in statement[3].casefold(), regular_statements))
+        logger.info(f"After: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
 
     # Clean output and Update Count
     label_loaded.config(text=f"Statements Shown: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
@@ -341,32 +423,8 @@ if __name__ == "__main__":
     # Parse Arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-    # parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
-    # #parser.add_argument("-o", "--ocid", help="OCID of compartment (if not passed, will use tenancy OCID from profile)", default="TENANCY")
-    # parser.add_argument("-sf", "--subjectfilter", help="Filter all statement subjects by this text")
-    # parser.add_argument("-vf", "--verbfilter", help="Filter all verbs (inspect,read,use,manage) by this text")
-    # parser.add_argument("-rf", "--resourcefilter", help="Filter all resource (eg database or stream-family etc) subjects by this text")
-    # parser.add_argument("-lf", "--locationfilter", help="Filter all location (eg compartment name) subjects by this text")
-    # parser.add_argument("-r", "--recurse", help="Recursion or not (default True)", action="store_true")
-    # parser.add_argument("-c", "--usecache", help="Load from local cache (if it exists)", action="store_true")
-    # parser.add_argument("-w", "--writejson", help="Write filtered output to JSON", action="store_true")
-    # parser.add_argument("-ip", "--instanceprincipal", help="Use Instance Principal Auth - negates --profile", action="store_true")
-    # parser.add_argument("-lo", "--logocid", help="Use an OCI Log - provide OCID")
-    # parser.add_argument("-t", "--threads", help="Concurrent Threads (def=5)", type=int, default=1)
     args = parser.parse_args()
     verbose = args.verbose
-    # use_cache = args.usecache
-    # #ocid = args.ocid
-    # profile = args.profile
-    # threads = args.threads
-    # sub_filter = args.subjectfilter
-    # verb_filter = args.verbfilter
-    # resource_filter = args.resourcefilter
-    # location_filter = args.locationfilter
-    # recursion = args.recurse
-    # write_json_output = args.writejson
-    # use_instance_principals = args.instanceprincipal
-    # log_ocid = None if not args.logocid else args.logocid
 
     # Main Logger
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s [%(threadName)s] %(levelname)s %(message)s')
@@ -385,124 +443,9 @@ if __name__ == "__main__":
         logging.getLogger('oci._vendor.urllib3.connectionpool').setLevel(logging.INFO)
 
 
-    # if use_instance_principals:
-    #     logger.info("Using Instance Principal Authentication")
-    #     signer = InstancePrincipalsSecurityTokenSigner()
-    #     identity_client = IdentityClient(config={}, signer=signer, retry_strategy=DEFAULT_RETRY_STRATEGY)
-    #     loggingingestion_client = loggingingestion.LoggingClient(config={}, signer=signer)
-    #     tenancy_ocid = signer.tenancy_id
-    # else:
-    #     # Use a profile (must be defined)
-    #     logger.info(f"Using Profile Authentication: {profile}")
-    #     try:
-    #         config = config.from_file(profile_name=profile)
-    #         logger.info(f'Using tenancy OCID from profile: {config["tenancy"]}')
-    #         tenancy_ocid = config["tenancy"]
-
-    #         # Create the OCI Client to use
-    #         identity_client = IdentityClient(config, retry_strategy=DEFAULT_RETRY_STRATEGY)
-    #         loggingingestion_client = loggingingestion.LoggingClient(config)
-    #     except ConfigFileNotFound as exc:
-    #         logger.fatal(f"Unable to use Profile Authentication: {exc}")
-    #         exit(1)
 
 
-    # # Print Special
-    # entries = []
-    # logger.info("========Summary Special==============")
-    # for index, statement in enumerate(special_statements, start=1):
-    #     logger.info(f"Statement #{index}: {statement[0]} | Policy: {statement[2]}")
-    #     entries.append(LogEntry(id=str(uuid.uuid1()),
-    #                             data=f"Statement #{index}: {statement}"))
-    # logger.info(f"Total Special statement in tenancy: {len(special_statements)}")
-
-    # # Create Log Batch
-    # special_batch = LogEntryBatch(defaultlogentrytime=datetime.datetime.utcnow(),
-    #                               source="oci-policy-analysis",
-    #                               type="special-statement",
-    #                               entries=entries)
-
-    # # Print Dynamic Groups
-    # entries = []
-    # logger.info("========Summary DG==============")
-    # for index, statement in enumerate(dynamic_group_statements, start=1):
-    #     logger.info(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
-    #     entries.append(LogEntry(id=str(uuid.uuid1()),
-    #                             data=f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}"))
-    # logger.info(f"Total Service statement in tenancy: {len(dynamic_group_statements)}")
-
-    # # Create Log Batch
-    # dg_batch = LogEntryBatch(defaultlogentrytime=datetime.datetime.utcnow(),
-    #                          source="oci-policy-analysis",
-    #                          type="dynamic-group-statement",
-    #                          entries=entries)
-
-    # # Print Service
-    # entries = []
-    # logger.info("========Summary SVC==============")
-    # for index, statement in enumerate(service_statements, start=1):
-    #     logger.info(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
-    #     entries.append(LogEntry(id=str(uuid.uuid1()),
-    #                             data=f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}"))
-    # logger.info(f"Total Service statement in tenancy: {len(service_statements)}")
-
-    # # Create Log Batch
-    # service_batch = LogEntryBatch(defaultlogentrytime=datetime.datetime.utcnow(),
-    #                               source="oci-policy-analysis",
-    #                               type="service-statement",
-    #                               entries=entries)
-
-    # # Print Regular
-    # entries = []
-    # logger.info("========Summary Reg==============")
-    # for index, statement in enumerate(regular_statements, start=1):
-    #     logger.info(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}{statement[6]}")
-    #     entries.append(LogEntry(id=str(uuid.uuid1()),
-    #                             data=f"Statement #{index}: {statement[9]} | Policy: {statement[5]}{statement[6]}"))
-    # logger.info(f"Total Regular statements in tenancy: {len(regular_statements)}")
-
-    # # Create Log Batch
-    # regular_batch = LogEntryBatch(defaultlogentrytime=datetime.datetime.now(datetime.timezone.utc),
-    #                               source="oci-policy-analysis",
-    #                               type="regular-statement",
-    #                               entries=entries)
-
-
-    # # To output file if required
-    # if write_json_output:
-    #     # Empty Dictionary
-    #     statements_list = []
-    #     for i, s in enumerate(special_statements):
-    #         statements_list.append({"type": "special", "statement": s[0],
-    #                                 "lineage": {"policy-compartment-ocid": s[4], "policy-relative-hierarchy": s[1],
-    #                                             "policy-name": s[2], "policy-ocid": s[3]}
-    #                                 })
-    #     for i, s in enumerate(dynamic_group_statements):
-    #         statements_list.append({"type": "dynamic-group", "subject": s[0], "verb": s[1],
-    #                                 "resource": s[2], "location": s[3], "conditions": s[4],
-    #                                 "lineage": {"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],
-    #                                             "policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}
-    #                                 })
-    #     for i, s in enumerate(service_statements):
-    #         statements_list.append({"type": "service", "subject": s[0], "verb": s[1],
-    #                                 "resource": s[2], "location": s[3], "conditions": s[4],
-    #                                 "lineage": {"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],
-    #                                             "policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}
-    #                                 })
-    #     for i, s in enumerate(regular_statements):
-    #         statements_list.append({"type": "regular", "subject": s[0], "verb": s[1],
-    #                                 "resource": s[2], "location": s[3], "conditions": s[4],
-    #                                 "lineage": {"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],
-    #                                             "policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}
-    #                                 })
-    #     # Serializing json
-    #     json_object = json.dumps(statements_list, indent=2)
-
-    #     # Writing to sample.json
-    #     with open(f"policyoutput-{tenancy_ocid}.json", "w") as outfile:
-    #         outfile.write(json_object)
-    # logger.debug(f"-----Complete--------")
-
+# Grab Profiles
 config2 = config.from_file()
 logger.info(f"Config: {config2}")
 
@@ -516,55 +459,75 @@ with open(r'/Users/agregory/.oci/config', 'r') as fp:
             print('string exists in file')
             options.append(row[1:-2])
 logger.info(f"Profiles: {options}")
+
 # UI Componentry
 
 window = tk.Tk()
 window.title("Policy Analysis")
 
-window.rowconfigure(2, minsize=800, weight=1)
+window.rowconfigure(3, minsize=800, weight=1)
 window.columnconfigure(0, minsize=800, weight=1)
 
-frm_buttons = tk.Frame(window, relief=tk.RAISED, bd=2)
+frm_init = tk.Frame(window, relief=tk.RAISED, bd=2)
+frm_filter = tk.Frame(window, relief=tk.RAISED, bd=2)
 frm_output = tk.Frame(window, relief=tk.RAISED, bd=2)
 frm_policy = tk.Frame(window, relief=tk.RAISED, bd=2)
 
 # Inputs
-label_profile = tk.Label(master=frm_buttons, text="Choose Profile")
-label_profile.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+use_instance_principal = tk.BooleanVar()
+input_use_ip = ttk.Checkbutton(frm_init, text='Instance Principal', variable=use_instance_principal, command=select_instance_principal)
+input_use_ip.grid(row=0, column=0, columnspan=2, sticky="ew", padx=25, pady=5)
 
 # Profile drop-down
+label_profile = tk.Label(master=frm_init, text="Choose Profile")
+label_profile.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+
 profile = tk.StringVar(window)
 profile.set(options[0]) 
-input_profile = tk.OptionMenu(frm_buttons, profile, *options)
-input_profile.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+input_profile = tk.OptionMenu(frm_init, profile, *options)
+input_profile.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
 
 #Caching
 use_cache = tk.BooleanVar()
-input_cache = ttk.Checkbutton(frm_buttons, text='Use Cache', variable=use_cache)
-input_cache.grid(row=0, column=2, sticky="ew", padx=5, pady=5)
+input_cache = ttk.Checkbutton(frm_init, text='Use Cache', variable=use_cache)
+input_cache.grid(row=0, column=2, columnspan=2, rowspan=2, sticky="ew", padx=25, pady=5)
 
 # Buttons
-btn_init = tk.Button(frm_buttons, text="Initialize", command=initialize_client)
-btn_load = tk.Button(frm_buttons, text="Load Policies", command=load_policy_analysis_from_client)
-btn_init.grid(row=1, column=0, sticky="ew", padx=5)
-btn_load.grid(row=1, column=1, sticky="ew", padx=5)
+#btn_init = tk.Button(frm_init, text="Initialize", command=initialize_client)
+btn_load = tk.Button(frm_init, width=50, text="Load Policies", command=load_policy_analysis_from_client)
+#btn_init.grid(row=1, column=0, sticky="ew", padx=5)
+btn_load.grid(row=0, column=4, columnspan=2, rowspan=2, sticky="ew", padx=25)
+
+# Progress Bar
+progressbar_val = tk.IntVar()
+progressbar = ttk.Progressbar(orient=tk.HORIZONTAL, length=400, mode="determinate", maximum=100,variable=progressbar_val)
+progressbar.place(x=450, y=50)
 
 # Filters
-label_filter = tk.Label(master=frm_buttons, text="Filters")
-label_filter.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
-btn_update = tk.Button(frm_buttons, text="Update Filter", command=update_output)
-btn_update.grid(row=1, column=2, sticky="ew", padx=5, pady=5)
+label_filter = tk.Label(master=frm_filter, text="Filters")
+label_filter.grid(row=0, column=0, sticky="ew", columnspan=2, padx=5, pady=5)
+btn_update = tk.Button(frm_filter, text="Update Filter", state=tk.DISABLED, command=update_output)
+btn_update.grid(row=0, column=2, sticky="ew", columnspan=2, padx=5, pady=5)
 
-label_subj = tk.Label(master=frm_buttons, text="Subject")
-label_subj.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-entry_subj = tk.Entry(master=frm_buttons)
-entry_subj.grid(row=2, column=2, sticky="ew", padx=5, pady=5)
+label_subj = tk.Label(master=frm_filter, text="Subject")
+label_subj.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+entry_subj = tk.Entry(master=frm_filter, state=tk.DISABLED)
+entry_subj.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
 
-label_verb = tk.Label(master=frm_buttons, text="Verb")
-label_verb.grid(row=2, column=3, sticky="ew", padx=5, pady=5)
-entry_verb = tk.Entry(master=frm_buttons)
-entry_verb.grid(row=2, column=4, sticky="ew", padx=5, pady=5)
+label_verb = tk.Label(master=frm_filter, text="Verb")
+label_verb.grid(row=1, column=2, sticky="ew", padx=5, pady=5)
+entry_verb = tk.Entry(master=frm_filter, state=tk.DISABLED)
+entry_verb.grid(row=1, column=3, sticky="ew", padx=5, pady=5)
 
+label_res = tk.Label(master=frm_filter, text="Resource")
+label_res.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+entry_res = tk.Entry(master=frm_filter, state=tk.DISABLED)
+entry_res.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+
+label_loc = tk.Label(master=frm_filter, text="Location")
+label_loc.grid(row=2, column=2, sticky="ew", padx=5, pady=5)
+entry_loc = tk.Entry(master=frm_filter, state=tk.DISABLED)
+entry_loc.grid(row=2, column=3, sticky="ew", padx=5, pady=5)
 
 # Output Show
 chk_show_special = tk.BooleanVar()
@@ -590,8 +553,9 @@ text_policies = tk.Text(master=frm_policy)
 text_policies.pack(expand=True, fill='both', side=tk.BOTTOM)
 
 # Insert to main window
-frm_buttons.grid(row=0, column=0, sticky="nsew")
-frm_output.grid(row=1, column=0, sticky="nsew")
-frm_policy.grid(row=2, column=0, sticky="nsew")
+frm_init.grid(row=0, column=0, sticky="nsew")
+frm_filter.grid(row=1, column=0, sticky="nsew")
+frm_output.grid(row=2, column=0, sticky="nsew")
+frm_policy.grid(row=3, column=0, sticky="nsew")
 
 window.mainloop()
