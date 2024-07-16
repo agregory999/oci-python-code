@@ -11,16 +11,22 @@ from oci.retry import DEFAULT_RETRY_STRATEGY
 from oci.exceptions import ConfigFileNotFound
 
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
-from oci.loggingingestion.models import PutLogsDetails, LogEntry, LogEntryBatch
 
 import argparse
 import json
+from pathlib import Path
 import os
 import datetime
 import uuid
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock, Thread
+
+import pyperclip
+
+###############################################################################################################
+# Global variables and Helper
+###############################################################################################################
 
 lock = Lock()
 loaded = 0
@@ -36,14 +42,15 @@ def progress_indicator(future):
 
         # Figure completion
         comp_step = int(loaded / to_load * 100)
-        logger.info(f"Completed {loaded} of {to_load} for a step of {comp_step}")
+        logger.debug(f"Completed {loaded} of {to_load} for a step of {comp_step}")
 
-        # report progress
-        #print(f'{future} completed',flush=True)
-        #progressbar.set(comp_step)
+        # Report progress via progress bar
         progressbar_val.set(comp_step)
 
- 
+###############################################################################################################
+# PolicyAnalysis class
+###############################################################################################################
+
 class PolicyAnalysis:
 
     dynamic_group_statements = []
@@ -52,7 +59,7 @@ class PolicyAnalysis:
     special_statements = []
 
     # Default threads
-    threads = 5
+    threads = 8
 
     # tenancy_ocid, identity_client recursion
     def __init__(self, verbose: bool):
@@ -95,7 +102,7 @@ class PolicyAnalysis:
         a, b, c, d, e = statement_tuple
         self.logger.debug(f"Subject: {a}, Verb: {b}, Resource: {c}, Location: {d}, Condition: {e}")
 
-    def parse_statement(self, statement, comp_string, policy):
+    def parse_statement(self, statement, comp_string, policy) -> tuple:
         # Parse tuple and partition
         # (subject, verb, resource, location, condition)
         # Pass 1 - where condition
@@ -177,7 +184,7 @@ class PolicyAnalysis:
 
                 # Root out "special" statements (endorse / define / as)
                 if str.startswith(statement, "endorse") or str.startswith(statement, "admit") or str.startswith(statement, "define"):
-                    # Special statement tuple
+                    # Special statement tuple 0=statement, 1=path, 2=name, 3=ocid, 4=compocid
                     statement_tuple = (statement,
                                     f"{path}", policy.name, policy.id, policy.compartment_id)
 
@@ -201,12 +208,18 @@ class PolicyAnalysis:
                 else:
                     self.regular_statements.append(statement_tuple)
 
-
     def load_policies_from_client(self, use_cache: bool, use_recursion: bool) -> bool:
         # Requirements
         # Logger (self)
         # IdentityClient (self)
 
+        # Start fresh
+        self.dynamic_group_statements = []
+        self.service_statements = []
+        self.regular_statements = []
+        self.special_statements = []
+
+        # If cached, load that and be done
         if use_cache:
             self.logger.info(f"---Starting Policy Load for tenant: {self.tenancy_ocid} from cached files---")
             if os.path.isfile(f'./.policy-special-cache-{self.tenancy_ocid}.dat'):
@@ -252,6 +265,10 @@ class PolicyAnalysis:
             global loaded, to_load
             to_load = len(comp_list)
 
+            if self.threads == 1:
+                # Don't use a thread pool - implement soon
+                pass
+
             with ThreadPoolExecutor(max_workers = self.threads, thread_name_prefix="thread") as executor:
                 # results = executor.map(self.load_policies, comp_list)
                 results = [executor.submit(self.load_policies, c) for c in comp_list]
@@ -282,24 +299,14 @@ class PolicyAnalysis:
         return (len(self.special_statements), len(self.regular_statements))
 
 ###############################################################################################################
-# Main Functions
+# Main Functions (UI and helper)
 ###############################################################################################################
-
-def initialize_client():
-    # Try to create everything needed from boxes
-    #profile = input_profile.get()
-    recursion = False
-    threads = 0
-
-    # Load class
-    policy_analysis.initialize_client(profile.get())
-    logger.info(f"initialized clients: {profile.get()}")
 
 def load_policy_analysis_thread():
     logger.info(f"Loading via cache: {use_cache.get()}")
     # Load class
     success = policy_analysis.load_policies_from_client(use_cache=use_cache.get(),
-                                              use_recursion=True)
+                                              use_recursion=use_recursion.get())
     
     if success:
         # Light up filter widgets
@@ -308,6 +315,14 @@ def load_policy_analysis_thread():
         entry_res.config(state=tk.NORMAL)
         entry_verb.config(state=tk.NORMAL)
         btn_update.config(state=tk.ACTIVE)
+        btn_clear.config(state=tk.ACTIVE)
+        btn_copy.config(state=tk.ACTIVE)
+    
+    # Display populate
+    update_output(default_open=False)
+
+    # Move Progress bar to completed
+    progressbar_val.set(0.0)
 
 def load_policy_analysis_from_client():
     
@@ -315,19 +330,12 @@ def load_policy_analysis_from_client():
     policy_analysis.initialize_client(profile.get(), 
                                       use_instance_principal=use_instance_principal.get())
 
-    # Move Progress bar
-    progressbar.step(2)
-
-    #progressbar_val.set(comp_step)
+    # Move Progress bar to 1%
+    progressbar_val.set(1)
 
     # Start background thread to load policies
-    Thread(target=load_policy_analysis_thread).start()
-
-    # Move Progress bar to completed
-    progressbar_val.set(0.0)
-
-    # Display
-    update_output()
+    bg_thread = Thread(target=load_policy_analysis_thread)
+    bg_thread.start()
 
 def select_instance_principal():
     # Update variable in class
@@ -339,9 +347,37 @@ def select_instance_principal():
         logger.info("Using Config")
         input_profile.config(state=tk.ACTIVE)
 
+def clear_filters():
+    logger.info(f"Clearing Filters")
+    entry_subj.delete(0, tk.END)
+    entry_verb.delete(0, tk.END)
+    entry_res.delete(0, tk.END)
+    entry_loc.delete(0, tk.END)
 
+    # Update the output
+    update_output()
 
-def update_output():
+def copy_selected():
+    selections = tree_policies.selection()
+    logger.debug(f"Copy selection: {selections}")
+    copied_string = ""
+    for it,row in enumerate(selections):
+        if it>0:
+            # Add a newline if multi row
+            copied_string += "\n"
+        logger.debug(f"Copy row: {row}")
+
+        values = tree_policies.item(row, 'text')  # get values for each selected row
+        #values = tree_policies.item(row)  # get values for each selected row
+
+        for item in values:
+            copied_string += f"{item}"
+
+    # Grab from char 13 onward - jsut the value
+    pyperclip.copy(copied_string[13:])
+    logger.info(f"Copied value: {copied_string[13:]}")
+
+def update_output(default_open: bool = False):
 
     # Grab from instance to local
     service_statements = policy_analysis.service_statements
@@ -385,33 +421,80 @@ def update_output():
 
     # Clean output and Update Count
     label_loaded.config(text=f"Statements Shown: {len(dynamic_group_statements)}/{len(service_statements)}/{len(regular_statements)} DG/SVC/Reg statements")
-    text_policies.delete(1.0,tk.END)
+    #text_policies.delete(1.0,tk.END)
+    for row in tree_policies.get_children():
+        tree_policies.delete(row)
 
     # Dynamically add output
     if chk_show_special.get():
+
+        # Add to tree
+        special_tree = tree_policies.insert("", tk.END, text="Special Statements")
         logger.debug("========Summary Special==============")
         for index, statement in enumerate(policy_analysis.special_statements, start=1):
             logger.debug(f"Statement #{index}: {statement[0]} | Policy: {statement[2]}")
-            text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[0]} | Policy: {statement[2]}\n")
+            #text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[0]} | Policy: {statement[2]}\n")
+
+            # Add with lineage
+            #special_tree_policy = tree_policies.insert(special_tree, tk.END, text=statement[0])
+            special_tree_policy = tree_policies.insert(special_tree, tk.END, open=default_open, text=f"Statement : {statement[0]}")
+            # 0=statement, 1=path, 2=name, 3=ocid, 4=compocid
+            tree_policies.insert(special_tree_policy, tk.END, text=f'Compartment: {f"(Root)" if not statement[1] else statement[1]}',iid="sp"+str(index)+"c")
+            tree_policies.insert(special_tree_policy, tk.END, text=f"Policy Name: {statement[2]}",iid="sp"+str(index)+"n")
+            tree_policies.insert(special_tree_policy, tk.END, text=f"Policy OCID: {statement[3]}",iid="sp"+str(index)+"o")
 
     if chk_show_service.get():
         logger.debug("========Service==============")
+        service_tree = tree_policies.insert("", tk.END, text="Service Statements")
         for index, statement in enumerate(service_statements, start=1):
             logger.debug(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
-            text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}\n")
-
+            #text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}\n")
+            service_tree_policy = tree_policies.insert(service_tree, tk.END, text=f"Statement : {statement[9]}")
+            # Details
+            tree_policies.insert(service_tree_policy, tk.END, open=default_open, text=f'Compartment: {f"(Root)" if not statement[5] else statement[5]}',iid="s"+str(index)+"c")
+            tree_policies.insert(service_tree_policy, tk.END, open=default_open, text=f"Policy Name: {statement[6]}",iid="s"+str(index)+"n")
+            tree_policies.insert(service_tree_policy, tk.END, open=default_open, text=f"Policy OCID: {statement[7]}",iid="s"+str(index)+"o")
     if chk_show_dynamic.get():
         logger.debug("========Dynamic Group==============")
+        dynamic_tree = tree_policies.insert("", tk.END, text="Dynamic Group Statements")
         for index, statement in enumerate(dynamic_group_statements, start=1):
             logger.debug(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}")
-            text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}\n")
-
+            #text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[9]} | Policy: {statement[5]}/{statement[6]}\n")
+            dynamic_tree_policy = tree_policies.insert(dynamic_tree,tk.END, text=f"Statement : {statement[9]}")
+            # Details
+            tree_policies.insert(dynamic_tree_policy, tk.END, open=default_open, text=f'Compartment: {f"(Root)" if not statement[5] else statement[5]}',iid="d"+str(index)+"c")
+            tree_policies.insert(dynamic_tree_policy, tk.END, open=default_open, text=f"Policy Name: {statement[6]}",iid="d"+str(index)+"n")
+            tree_policies.insert(dynamic_tree_policy, tk.END, open=default_open, text=f"Policy OCID: {statement[7]}",iid="d"+str(index)+"o")
     if chk_show_regular.get():
-        logger.debug("========Dynamic Group==============")
+         
+        # Regular Tree
+        regular_tree = tree_policies.insert("", tk.END, text="Regular Statements", open=True)
+
+        logger.debug("========Regular==============")
         for index, statement in enumerate(regular_statements, start=1):
             logger.debug(f"Statement #{index}: {statement[9]} | Policy: {statement[5]}{statement[6]}")
-            text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[9]} | Policy: {statement[5]}{statement[6]}\n")
+            #text_policies.insert(tk.INSERT,f"Statement #{index}: {statement[9]} | Policy: {statement[5]}{statement[6]}\n")
+            regular_tree_policy = tree_policies.insert(regular_tree, tk.END, text=f"Statement : {statement[9]}")
+            # Details (Comp, Pol)
+            tree_policies.insert(regular_tree_policy, tk.END, open=default_open, text=f'Compartment: {f"(Root)" if not statement[5] else statement[5]}',iid="r"+str(index)+"c")
+            tree_policies.insert(regular_tree_policy, tk.END, open=default_open, text=f"Policy Name: {statement[6]}",iid="r"+str(index)+"n")
+            tree_policies.insert(regular_tree_policy, tk.END, open=default_open, text=f"Policy OCID: {statement[7]}",iid="r"+str(index)+"o")
         logger.info(f"Total Special statement in tenancy: {len(policy_analysis.special_statements)}")
+
+def update_load_options():
+    # Control the load button
+    if use_cache.get():
+        # Use Cache
+        btn_load.config(text="Load tenancy policies from cached values on disk")
+        input_recursion.config(state=tk.DISABLED)
+    elif use_recursion.get():
+        # Load recursively
+        input_cache.config(state=tk.DISABLED)
+        btn_load.config(text="Load policies from all compartments")
+    else:
+        input_cache.config(state=tk.ACTIVE)
+        input_recursion.config(state=tk.ACTIVE)
+        btn_load.config(text="Load policies from ROOT compartment only")
 
 ########################################
 # Main Code
@@ -436,126 +519,142 @@ if __name__ == "__main__":
     # Create the class
     policy_analysis = PolicyAnalysis(verbose)
     
-
     # Update Logging Level
     if verbose:
         logger.setLevel(logging.DEBUG)
         logging.getLogger('oci._vendor.urllib3.connectionpool').setLevel(logging.INFO)
 
+    # Grab Profiles
+    profile_list = []
+    # string to search in file
+    try:
+        with open(Path.home() / ".oci" / "config", 'r') as fp:
+            # read all lines using readline()
+            lines = fp.readlines()
+            for row in lines:
+                if row.find('[') != -1 and row.find(']') != -1:
+                    profile_list.append(row[1:-2])
+    except FileNotFoundError as e:
+        logger.warning(f"Config File not found, must use instance principal: {e}")
+        profile_list.append("[NONE]")
+    logger.info(f"Profiles: {profile_list}")
+
+    # UI Componentry
+
+    window = tk.Tk()
+    window.title("Policy Analysis")
+
+    window.rowconfigure(3, minsize=800, weight=1)
+    window.columnconfigure(0, minsize=800, weight=1)
+
+    frm_init = tk.Frame(window, relief=tk.RAISED, bd=2)
+    frm_filter = tk.Frame(window, relief=tk.RAISED, bd=2)
+    frm_output = tk.Frame(window, relief=tk.RAISED, bd=2)
+    frm_policy = tk.Frame(window, relief=tk.RAISED, bd=2)
+
+    # Inputs
+    use_instance_principal = tk.BooleanVar()
+    input_use_ip = ttk.Checkbutton(frm_init, text='Instance Principal', variable=use_instance_principal, command=select_instance_principal)
+    input_use_ip.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+
+    # Profile drop-down
+    label_profile = tk.Label(master=frm_init, text="Choose Profile")
+    label_profile.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+
+    # If no profiles, force instance
+    profile = tk.StringVar(window)
+    profile.set(profile_list[0]) 
+    input_profile = tk.OptionMenu(frm_init, profile, *profile_list)
+    if "NONE" in profile_list[0]:
+        use_instance_principal.set(True)
+        input_profile.config(state=tk.DISABLED)
+    # else:    
+    #     profile.set(profile_list[0]) 
+    input_profile.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+
+    #Caching
+    use_cache = tk.BooleanVar()
+    input_cache = ttk.Checkbutton(frm_init, text='Use Cache?', variable=use_cache, command=update_load_options)
+    input_cache.grid(row=0, column=2, columnspan=2, sticky="ew", padx=25, pady=5)
+
+    # Recursion
+    use_recursion = tk.BooleanVar()
+    input_recursion= ttk.Checkbutton(frm_init, text='Recursion?', variable=use_recursion, command=update_load_options)
+    input_recursion.grid(row=1, column=2, columnspan=2, sticky="ew", padx=25, pady=5)
 
 
+    # Buttons
+    #btn_init = tk.Button(frm_init, text="Initialize", command=initialize_client)
+    btn_load = tk.Button(frm_init, width=50, text="Load policies from ROOT compartment only", command=load_policy_analysis_from_client)
+    #btn_init.grid(row=1, column=0, sticky="ew", padx=5)
+    btn_load.grid(row=0, column=4, columnspan=2, rowspan=2, sticky="ew", padx=25)
 
-# Grab Profiles
-config2 = config.from_file()
-logger.info(f"Config: {config2}")
+    # Progress Bar
+    progressbar_val = tk.IntVar()
+    progressbar = ttk.Progressbar(orient=tk.HORIZONTAL, length=400, mode="determinate", maximum=100,variable=progressbar_val)
+    progressbar.place(x=450, y=50)
 
-options = []
-# string to search in file
-with open(r'/Users/agregory/.oci/config', 'r') as fp:
-    # read all lines using readline()
-    lines = fp.readlines()
-    for row in lines:
-        if row.find('[') != -1 and row.find(']') != -1:
-            print('string exists in file')
-            options.append(row[1:-2])
-logger.info(f"Profiles: {options}")
+    # Filters
+    label_filter = tk.Label(master=frm_filter, text="Filters")
+    label_filter.grid(row=0, column=0, sticky="ew", columnspan=2, padx=5, pady=5)
+    btn_update = tk.Button(frm_filter, text="Update Filter", state=tk.DISABLED, command=update_output)
+    btn_update.grid(row=1, column=4, sticky="ew", columnspan=2, padx=5, pady=5)
+    btn_clear = tk.Button(frm_filter, text="Clear Filters", state=tk.DISABLED, command=clear_filters)
+    btn_clear.grid(row=2, column=4, sticky="ew", columnspan=2, padx=5, pady=5)
 
-# UI Componentry
+    label_subj = tk.Label(master=frm_filter, text="Subject")
+    label_subj.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+    entry_subj = tk.Entry(master=frm_filter, state=tk.DISABLED)
+    entry_subj.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
 
-window = tk.Tk()
-window.title("Policy Analysis")
+    label_verb = tk.Label(master=frm_filter, text="Verb")
+    label_verb.grid(row=1, column=2, sticky="ew", padx=5, pady=5)
+    entry_verb = tk.Entry(master=frm_filter, state=tk.DISABLED)
+    entry_verb.grid(row=1, column=3, sticky="ew", padx=5, pady=5)
 
-window.rowconfigure(3, minsize=800, weight=1)
-window.columnconfigure(0, minsize=800, weight=1)
+    label_res = tk.Label(master=frm_filter, text="Resource")
+    label_res.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
+    entry_res = tk.Entry(master=frm_filter, state=tk.DISABLED)
+    entry_res.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
 
-frm_init = tk.Frame(window, relief=tk.RAISED, bd=2)
-frm_filter = tk.Frame(window, relief=tk.RAISED, bd=2)
-frm_output = tk.Frame(window, relief=tk.RAISED, bd=2)
-frm_policy = tk.Frame(window, relief=tk.RAISED, bd=2)
+    label_loc = tk.Label(master=frm_filter, text="Location")
+    label_loc.grid(row=2, column=2, sticky="ew", padx=5, pady=5)
+    entry_loc = tk.Entry(master=frm_filter, state=tk.DISABLED)
+    entry_loc.grid(row=2, column=3, sticky="ew", padx=5, pady=5)
 
-# Inputs
-use_instance_principal = tk.BooleanVar()
-input_use_ip = ttk.Checkbutton(frm_init, text='Instance Principal', variable=use_instance_principal, command=select_instance_principal)
-input_use_ip.grid(row=0, column=0, columnspan=2, sticky="ew", padx=25, pady=5)
+    # Output Show
+    chk_show_special = tk.BooleanVar()
+    chk_show_dynamic = tk.BooleanVar()
+    chk_show_service = tk.BooleanVar()
+    chk_show_regular = tk.BooleanVar(value=True)
+    show_special = ttk.Checkbutton(frm_output, text='Show Special', variable=chk_show_special, command=update_output)
+    show_dynamic = ttk.Checkbutton(frm_output, text='Show Dynamic', variable=chk_show_dynamic, command=update_output)
+    show_service = ttk.Checkbutton(frm_output, text='Show Service', variable=chk_show_service, command=update_output)
+    show_regular = ttk.Checkbutton(frm_output, text='Show Regular', variable=chk_show_regular, command=update_output)
+    show_special.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
+    show_dynamic.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
+    show_service.grid(row=3, column=2, sticky="ew", padx=5, pady=5)
+    show_regular.grid(row=3, column=3, sticky="ew", padx=5, pady=5)
 
-# Profile drop-down
-label_profile = tk.Label(master=frm_init, text="Choose Profile")
-label_profile.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+    # Policy Window
 
-profile = tk.StringVar(window)
-profile.set(options[0]) 
-input_profile = tk.OptionMenu(frm_init, profile, *options)
-input_profile.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+    label_loaded = tk.Label(master=frm_policy, text="Statements: ")
+    label_loaded.pack()
 
-#Caching
-use_cache = tk.BooleanVar()
-input_cache = ttk.Checkbutton(frm_init, text='Use Cache', variable=use_cache)
-input_cache.grid(row=0, column=2, columnspan=2, rowspan=2, sticky="ew", padx=25, pady=5)
+    btn_copy = tk.Button(master=frm_policy, text="Copy Selected", state=tk.DISABLED, command=copy_selected)
+    btn_copy.pack()
 
-# Buttons
-#btn_init = tk.Button(frm_init, text="Initialize", command=initialize_client)
-btn_load = tk.Button(frm_init, width=50, text="Load Policies", command=load_policy_analysis_from_client)
-#btn_init.grid(row=1, column=0, sticky="ew", padx=5)
-btn_load.grid(row=0, column=4, columnspan=2, rowspan=2, sticky="ew", padx=25)
+    #text_policies = tk.Text(master=frm_policy)
+    #text_policies.grid(row=1, column=0, columnspan=3, sticky="ewsn", padx=5, pady=5)
+    #text_policies.pack(expand=True, fill='both', side=tk.BOTTOM)
 
-# Progress Bar
-progressbar_val = tk.IntVar()
-progressbar = ttk.Progressbar(orient=tk.HORIZONTAL, length=400, mode="determinate", maximum=100,variable=progressbar_val)
-progressbar.place(x=450, y=50)
+    tree_policies = ttk.Treeview(master=frm_policy)
+    tree_policies.pack(expand=True, fill='both', side=tk.BOTTOM)
 
-# Filters
-label_filter = tk.Label(master=frm_filter, text="Filters")
-label_filter.grid(row=0, column=0, sticky="ew", columnspan=2, padx=5, pady=5)
-btn_update = tk.Button(frm_filter, text="Update Filter", state=tk.DISABLED, command=update_output)
-btn_update.grid(row=0, column=2, sticky="ew", columnspan=2, padx=5, pady=5)
+    # Insert to main window
+    frm_init.grid(row=0, column=0, sticky="nsew")
+    frm_filter.grid(row=1, column=0, sticky="nsew")
+    frm_output.grid(row=2, column=0, sticky="nsew")
+    frm_policy.grid(row=3, column=0, sticky="nsew")
 
-label_subj = tk.Label(master=frm_filter, text="Subject")
-label_subj.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-entry_subj = tk.Entry(master=frm_filter, state=tk.DISABLED)
-entry_subj.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-
-label_verb = tk.Label(master=frm_filter, text="Verb")
-label_verb.grid(row=1, column=2, sticky="ew", padx=5, pady=5)
-entry_verb = tk.Entry(master=frm_filter, state=tk.DISABLED)
-entry_verb.grid(row=1, column=3, sticky="ew", padx=5, pady=5)
-
-label_res = tk.Label(master=frm_filter, text="Resource")
-label_res.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
-entry_res = tk.Entry(master=frm_filter, state=tk.DISABLED)
-entry_res.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-
-label_loc = tk.Label(master=frm_filter, text="Location")
-label_loc.grid(row=2, column=2, sticky="ew", padx=5, pady=5)
-entry_loc = tk.Entry(master=frm_filter, state=tk.DISABLED)
-entry_loc.grid(row=2, column=3, sticky="ew", padx=5, pady=5)
-
-# Output Show
-chk_show_special = tk.BooleanVar()
-chk_show_dynamic = tk.BooleanVar()
-chk_show_service = tk.BooleanVar()
-chk_show_regular = tk.BooleanVar()
-show_special = ttk.Checkbutton(frm_output, text='Show Special', variable=chk_show_special, command=update_output)
-show_dynamic = ttk.Checkbutton(frm_output, text='Show Dynamic', variable=chk_show_dynamic, command=update_output)
-show_service = ttk.Checkbutton(frm_output, text='Show Service', variable=chk_show_service, command=update_output)
-show_regular = ttk.Checkbutton(frm_output, text='Show Regular', variable=chk_show_regular, command=update_output)
-show_special.grid(row=3, column=0, sticky="ew", padx=5, pady=5)
-show_dynamic.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
-show_service.grid(row=3, column=2, sticky="ew", padx=5, pady=5)
-show_regular.grid(row=3, column=3, sticky="ew", padx=5, pady=5)
-
-# Policy Window
-
-label_loaded = tk.Label(master=frm_policy, text="Statements: ")
-label_loaded.pack()
-
-text_policies = tk.Text(master=frm_policy)
-#text_policies.grid(row=1, column=0, columnspan=3, sticky="ewsn", padx=5, pady=5)
-text_policies.pack(expand=True, fill='both', side=tk.BOTTOM)
-
-# Insert to main window
-frm_init.grid(row=0, column=0, sticky="nsew")
-frm_filter.grid(row=1, column=0, sticky="nsew")
-frm_output.grid(row=2, column=0, sticky="nsew")
-frm_policy.grid(row=3, column=0, sticky="nsew")
-
-window.mainloop()
+    window.mainloop()
