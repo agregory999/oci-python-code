@@ -557,7 +557,7 @@ if __name__ == "__main__":
     tree_dg["columns"] = ("Value")
     tree_dg.column("#0", stretch=False, width=220)
     tree_dg.column("Value", stretch=True)
-    tree_dg.heading("#0", text="Name")
+    tree_dg.heading("#0", text="Name / Type", anchor=tk.W)
     tree_dg.heading("Value", text="Value (Copy-able)", anchor=tk.W)
 
     tree_policies = ttk.Treeview(master=frm_policy,show='tree')
