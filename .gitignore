@@ -133,3 +133,9 @@ dmypy.json
 *.code-workspace
 *.json
 *.csv
+.policy-*
+.venv
+sudoku-backtracing.py
+sudoku-bitmask.py
+sudoku-crosshatch-backtracing.py
+sudoku-naive.py

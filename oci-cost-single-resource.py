@@ -113,7 +113,7 @@ usage_query = RequestSummarizedUsagesDetails(
     filter=dim_filter
 )
 
-logging.info(f'Usage querey: {usage_query}')
+logging.info(f'Usage query: {usage_query}')
 
 ############ Part 1 - Cost and Usage Query based on tags ####################
 # Run the cost query
