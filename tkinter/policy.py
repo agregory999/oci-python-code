@@ -124,6 +124,8 @@ class PolicyAnalysis:
                                 )
                 if result.group('perm'):
                     self.logger.debug(f"Statement Res: {result.group('resource')} Tuple res: {statement_tuple[9]}")
+                if "resource" in statement_tuple[6]:
+                    self.logger.info(f"Resource Statement: {statement_tuple[4]}")
                 return statement_tuple
             except Exception as e:
                 self.logger.warning(f"Failed to parse result: {e}")
@@ -251,6 +253,7 @@ class PolicyAnalysis:
                 # We know the compartment count now - set up progress, if warranted
                 if self.progress:
                     self.progress.set_to_load(len(comp_list))
+                    self.logger.info(f"Progress Bar set total: {len(comp_list)}")
 
                 # Use multiple threads at once
                 with ThreadPoolExecutor(max_workers = THREADS, thread_name_prefix="thread") as executor:
@@ -272,6 +275,9 @@ class PolicyAnalysis:
                     except Exception as exc:
                         self.logger.error(f"Executor Exception: {exc}")
                 
+                # Set progress back to 0
+                self.progress.progressbar_val = 0.0
+
                 # Stop timer
                 toc = time.perf_counter()
                 self.logger.info(f"Loaded {len(self.special_statements)}/{len(self.regular_statements)} special/regular policy statements on {THREADS} threads in {toc-tic:.2f}s")

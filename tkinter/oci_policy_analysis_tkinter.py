@@ -3,6 +3,7 @@ import tkinter as tk
 #import tkinter.ttk as ttk
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+from tkinter.filedialog import askopenfilename, asksaveasfilename
 
 # Python
 import json
@@ -11,6 +12,8 @@ import os
 import logging
 from threading import Lock, Thread
 import time
+import csv
+
 # 3rd Party
 import pyperclip
 import argparse
@@ -26,6 +29,9 @@ from progress import Progress
 
 progressbar_val = None
 
+POLICY_TAB_NAME = "Policy Statement View"
+DG_TAB_NAME = "Dynamic Group View"
+
 ###############################################################################################################
 # Main Functions (UI and helper)
 ###############################################################################################################
@@ -33,6 +39,30 @@ progressbar_val = None
 def load_policy_analysis_thread():
     # Load Statements
     policy_analysis.load_policies_from_client()
+
+def enable_buttons():
+    # Light up Policy filter widgets
+    entry_subj.config(state=tk.NORMAL)
+    entry_loc.config(state=tk.NORMAL)
+    entry_res.config(state=tk.NORMAL)
+    entry_verb.config(state=tk.NORMAL)
+    entry_policy_loc.config(state=tk.NORMAL)
+    entry_condition.config(state=tk.NORMAL)
+    btn_update.config(state=tk.ACTIVE)
+    btn_clear.config(state=tk.ACTIVE)
+    btn_copy.config(state=tk.ACTIVE)
+    btn_load.config(state=tk.ACTIVE)
+    btn_save.config(state=tk.ACTIVE)
+    # input_my_user.config(state=tk.ACTIVE)
+    # input_my_compartment.config(state=tk.ACTIVE)
+
+    # Dynamic Groups
+    dg_entry_name.config(state=tk.NORMAL)
+    dg_entry_ocid.config(state=tk.NORMAL)
+    dg_entry_type.config(state=tk.NORMAL)
+    dg_btn_clear.config(state=tk.ACTIVE)
+    dg_btn_update.config(state=tk.ACTIVE)
+    btn_dg_copy.config(state=tk.ACTIVE)
 
 def load_policy_analysis_from_client():
     
@@ -51,29 +81,10 @@ def load_policy_analysis_from_client():
                                       use_instance_principal=use_instance_principal.get())
     dyn_group_analysis.load_all_dynamic_groups(use_cache=use_cache.get())
 
-    # if success:
-    # Light up filter widgets
-    entry_subj.config(state=tk.NORMAL)
-    entry_loc.config(state=tk.NORMAL)
-    entry_res.config(state=tk.NORMAL)
-    entry_verb.config(state=tk.NORMAL)
-    entry_policy_loc.config(state=tk.NORMAL)
-    entry_condition.config(state=tk.NORMAL)
-    btn_update.config(state=tk.ACTIVE)
-    btn_clear.config(state=tk.ACTIVE)
-    btn_copy.config(state=tk.ACTIVE)
-    # input_my_user.config(state=tk.ACTIVE)
-    # input_my_compartment.config(state=tk.ACTIVE)
-
-    # Dynamic Groups
-    dg_entry_ocid.config(state=tk.NORMAL)
-    dg_entry_type.config(state=tk.NORMAL)
-    dg_btn_clear.config(state=tk.ACTIVE)
-    dg_btn_update.config(state=tk.ACTIVE)
-
     # Display populate
     update_output(default_open=False)
     update_output_dg()
+    enable_buttons()
 
 def select_instance_principal():
     '''Update variable in class'''
@@ -110,7 +121,17 @@ def clear_filters_dg():
     update_output_dg()
 
 def copy_selected():
-    selections = tree_policies.selection()
+
+    # Determine active tab
+    current_tab = tab_control.tab(tab_control.select(), "text")
+    logger.info(f"Current tab: {current_tab}")
+    if current_tab in POLICY_TAB_NAME:
+        tree_to_use = tree_policies
+    else:
+        tree_to_use = tree_dg
+
+    # Grab selected and Copy
+    selections = tree_to_use.selection()
     logger.debug(f"Copy selection: {selections}")
     copied_string = ""
     for it,row in enumerate(selections):
@@ -119,15 +140,14 @@ def copy_selected():
             copied_string += "\n"
         logger.debug(f"Copy row: {row}")
 
-        values = tree_policies.item(row, 'text')  # get values for each selected row
-        #values = tree_policies.item(row)  # get values for each selected row
+        values = tree_to_use.item(row, 'values')  # get values for each selected row
 
         for item in values:
             copied_string += f"{item}"
 
     # Grab from char 13 onward - jsut the value
-    pyperclip.copy(copied_string[12:])
-    logger.info(f"Copied value: {copied_string[12:]}")
+    pyperclip.copy(copied_string)
+    logger.info(f"Copied value: {copied_string}")
 
 def update_output(default_open: bool = False):
 
@@ -148,7 +168,7 @@ def update_output(default_open: bool = False):
     if chk_show_special.get():
 
         # Add to tree
-        special_tree = tree_policies.insert("", tk.END, text="Special Statements")
+        special_tree = tree_policies.insert("", tk.END, text="Special Statements (unfiltered)")
         logger.debug("========Summary Special==============")
         for index, statement in enumerate(policy_analysis.special_statements, start=1):
             logger.debug(f"Statement #{index}: {statement[0]} | Policy: {statement[2]}")
@@ -169,9 +189,12 @@ def update_output(default_open: bool = False):
         logger.debug("========Regular==============")
         regular_tree = tree_policies.insert("", tk.END, text="Regular Statements", open=True)
         any_tree = tree_policies.insert("", tk.END, text="Any User/Group Statements", open=True)
-    if verbose:
-        logger.debug("========Invalid==============")
-        invalid_tree = tree_policies.insert("", tk.END, text="Invalid Statements", open=True)
+    if chk_show_resource.get():
+        logger.debug("========Resource==============")
+        resource_tree = tree_policies.insert("", tk.END, text="Resource Statements")
+
+    # deine just in case
+    invalid_tree = None
 
     # Combined Iterate
     for index, statement in enumerate(regular_statements_filtered, start=1):
@@ -180,29 +203,34 @@ def update_output(default_open: bool = False):
         # Check type
         if chk_show_dynamic.get() and (statement[6] == "dynamic-group" or statement[6] == "dynamicgroup"):
             tree_to_use = dynamic_tree
+        elif chk_show_resource.get() and statement[6] == "resource":
+            tree_to_use = resource_tree
         elif chk_show_service.get() and statement[6] == "service":
             tree_to_use = service_tree
         elif chk_show_regular.get() and (statement[6] == "any-user" or statement[6] == "any-group"):
             tree_to_use = any_tree
+        elif invalid_tree is None and not statement[5]:
+            # Only define this tree if need be
+            logger.debug("========Invalid==============")
+            invalid_tree = tree_policies.insert("", tk.END, text="Invalid Statements", open=True)
+            tree_to_use = invalid_tree
         elif not statement[5]:
             tree_to_use = invalid_tree
-            if not verbose:
-                continue
         elif chk_show_regular.get() and statement[6] == "group":
             tree_to_use = regular_tree
         else:
             logger.debug(f"Not showing statement {index}: {statement[4]}")
             continue
 
-        tree_policy = tree_policies.insert(tree_to_use, tk.END, text=f"Statement : {statement[4]}")
+        tree_policy = tree_policies.insert(tree_to_use, tk.END, text=f"Statement", values=[statement[4]])
         # Details (Comp, Pol)
-        tree_policies.insert(tree_policy, tk.END, open=default_open, text=f'Compartment: {f"(Root)" if not statement[3] else statement[3]}',iid="r"+str(index)+"c")
-        tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Policy Name: {statement[0]}",iid="r"+str(index)+"n")
-        tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Policy OCID: {statement[1]}",iid="r"+str(index)+"o")
+        tree_policies.insert(tree_policy, tk.END, open=default_open, text=f'Compartment', values=[f"(Root)" if not statement[3] else statement[3]],iid="r"+str(index)+"c")
+        tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Policy Name", values=[statement[0]],iid="r"+str(index)+"n")
+        tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Policy OCID", values=[statement[1]],iid="r"+str(index)+"o")
         if statement[13] != "":
-            tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Conditions: {statement[13]}",iid="r"+str(index)+"co")
+            tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Conditions", values=[statement[13]],iid="r"+str(index)+"co")
         if statement[14] != "":
-            tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Comments: {statement[14]}",iid="r"+str(index)+"op")
+            tree_policies.insert(tree_policy, tk.END, open=default_open, text=f"Comments", values=[statement[14]],iid="r"+str(index)+"op")
 
         # Additional Info if DG
         if statement[6] == "dynamic-group" or statement[6] == "dynamicgroup":
@@ -211,10 +239,15 @@ def update_output(default_open: bool = False):
                 #logger.info(f"DG: {dg[0]} Subject: {statement[7]}")
                 if dg[0].casefold() in statement[7].casefold():
                     # If the DG is in the DG List, print parts of it
-                    tree_policies.insert(tree_policy, tk.END, text=f"Dynamic Group matching rules: {dg[2]}")
+                    tree_policies.insert(tree_policy, tk.END, text=f"Dynamic Group matching rules", values=[dg[2]])
 
 def update_output_dg(default_open: bool = False):
-    dynamic_groups = dyn_group_analysis.dynamic_groups  
+    dynamic_groups = dyn_group_analysis.dynamic_groups
+    filtered_dynamic_groups = dyn_group_analysis.filter_dynamic_groups(name_filter=dg_entry_name.get(),
+                                                                       type_filter=dg_entry_type.get(),
+                                                                       ocid_filter=dg_entry_ocid.get()
+                                                                       )
+    # Regular statements for comparison
     regular_statements = policy_analysis.regular_statements
     dynamic_groups_filtered = []
     dg_type_filter = dg_entry_type.get()
@@ -237,34 +270,33 @@ def update_output_dg(default_open: bool = False):
     for index, dg in enumerate(dynamic_groups, start=1):
         logger.debug(f"DG #{index}: {dg[0]} | Rules: {dg[3]}")
         # dg_detail = tree_dg.insert('', tk.END, text=f'Name: {dg[0]} {"(Not in Use)" if not dg[4] else ""}')
-        dg_detail = tree_dg.insert('', tk.END, text="Dynamic Group Name", values=(f'{dg[0]} {"(Not in Use)" if not dg[4] else ""}'))
+        dg_detail = tree_dg.insert('', tk.END, text="Dynamic Group Name", values=[f'{dg[0]} {"(Not in Use)" if not dg[4] else ""}'])
         # tree_dg.insert(dg_detail, tk.END, text=f"ID: {dg[1]}")
         tree_dg.insert(dg_detail, tk.END, text="OCID", values=(dg[1]))
-        dg_rule_detail = tree_dg.insert(dg_detail, tk.END, text="Matching Rule", values=(dg[2]))
+        dg_rule_detail = tree_dg.insert(dg_detail, tk.END, text="Matching Rule", values=[dg[2]])
         for rule in dg[3]:
             # tree_dg.insert(dg_rule_detail, tk.END, text=f"Rule: {rule}")
-            tree_dg.insert(dg_rule_detail, tk.END, text="Rule Component", values=(f"{rule}"))
+            tree_dg.insert(dg_rule_detail, tk.END, text="Rule Component", values=[rule])
         # Show Policies using this DG
         for statement in regular_statements:
             if dg[0].casefold() == statement[7].casefold():
                 dg_rule_statement_detail = tree_dg.insert(dg_rule_detail, tk.END, text=f"Policy Referenced", values=(f'{statement[3] if statement[3] else "(Root)/"}{statement[0]}'))
-                logger.info(f"Statement[4]: {statement[4]}")
                 tree_dg.insert(dg_rule_statement_detail, tk.END, text="Policy Statement",values=[statement[4]])
 
 def update_load_options():
     # Control the load button
     if use_cache.get():
         # Use Cache
-        btn_load.config(text="Load tenancy policies from cached values on disk")
+        btn_load.config(text="Load Policies and Dynamic Groups from cached values on disk")
         input_recursion.config(state=tk.DISABLED)
     elif use_recursion.get():
         # Load recursively
         input_cache.config(state=tk.DISABLED)
-        btn_load.config(text="Load policies from all compartments")
+        btn_load.config(text="Load Policies and Dynamic Groups from all compartments")
     else:
         input_cache.config(state=tk.ACTIVE)
         input_recursion.config(state=tk.ACTIVE)
-        btn_load.config(text="Load policies from ROOT compartment only")
+        btn_load.config(text="Load Policies from ROOT compartment only, and Dynamic Groups")
 
 # def update_show_my_details():
 #     if show_only_my_user.get():
@@ -331,11 +363,78 @@ def run_dynamic_group_ocid_analysis():
     update_output_dg()
     logger.info(f"Ran DG OCID Analysis from UI")
 
-# Get the progress value back into UI scope
+# Check progress meter for updates
 def update_progress():
-    #global progressbar_val
+    logger.debug(f"Called check progress.  Value: {progress.progressbar_val} UI: {progressbar_val.get()}")
+    
+    # Whatever it is, set to update
     progressbar_val.set(progress.progressbar_val)
-    logger.debug(f"Progress: {progressbar_val.get()}")
+
+    # If the load is done, reset the finished flag
+    if policy_analysis.finished:
+        update_output()
+        policy_analysis.finished = False
+    
+    # Set an event every 1s forever
+    window.after(1000, update_progress)
+
+def load_file():
+    """Load a JSON file from disk"""
+    filepath = askopenfilename(
+        defaultextension=".json"
+    )
+    if not filepath:
+        return
+    
+    with open(filepath, mode="r", encoding="utf-8") as input_file:
+        text = input_file.read()
+    policy_analysis.regular_statements = json.loads(text)
+    logger.info(f"Loaded saved policies from disk")
+
+    update_output()
+    enable_buttons()
+
+
+def save_file():
+    """Save the current file as a new file."""
+
+    filepath = asksaveasfilename(
+        defaultextension=".csv",
+        filetypes=[("CSV Files", "*.csv"), ("JSON Files", "*.json")],
+    )
+    if not filepath:
+        return
+
+    # Grab filtered output
+    regular_statements_filtered = policy_analysis.filter_policy_statements(subj_filter=entry_subj.get(),
+                                                                        verb_filter=entry_verb.get(),
+                                                                        resource_filter=entry_res.get(),
+                                                                        location_filter=entry_loc.get(),
+                                                                        hierarchy_filter=entry_policy_loc.get(),
+                                                                        condition_filter=entry_condition.get())
+
+    # TODO - Filter the output by what is shown after filter?
+    # If not, then move the save button higher up
+
+    if filepath.endswith(".json"):
+        logger.info(f"JSON Output: {filepath}")
+        # Write JSON file using filtered data
+
+        with open(filepath, mode="w", encoding="utf-8") as output_file:
+            json_out = json.dumps(regular_statements_filtered)
+            output_file.write(json_out)
+
+    else:
+        logger.info(f"CSV Output: {filepath}")
+        # Write CSV file using filtered data
+        with open(filepath, 'w', newline='',) as csvfile:
+            # Set up CSV
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(["POLICY_NAME","POLICY_OCID","POLICY_HIERARCHY","STATEMENT_TEXT","STATEMENT_TYPE","STATEMENT_SUBJECT","STATEMENT_VERB", "STATEMENT_RESOURCE", "STATEMENT_PERMISSION", "STATEMENT_LOCATION", "STATEMENT_CONDITIONS", "STATEMENT_COMMENTS"])
+
+            for st in regular_statements_filtered:
+                csv_writer.writerow([st[0], st[1], st[3], f"{st[4]}", st[6], st[7], st[8], st[9], st[10], st[12], st[13], st[14]])
+    logger.info(f"Finished writing file: {filepath}")
 
 ########################################
 # Main Code
@@ -394,8 +493,8 @@ if __name__ == "__main__":
     tab_policy = ttk.Frame(tab_control)
     tab_dg = ttk.Frame(tab_control)
 
-    tab_control.add(tab_policy, text='Policy View')
-    tab_control.add(tab_dg, text='Dynamic Groups')
+    tab_control.add(tab_policy, text=POLICY_TAB_NAME)
+    tab_control.add(tab_dg, text=DG_TAB_NAME)
 
     # Frames
     frm_init = ttk.Frame(window, borderwidth=2)
@@ -438,7 +537,7 @@ if __name__ == "__main__":
     input_recursion.grid(row=1, column=2, columnspan=2, sticky="ew", padx=25, pady=3)
 
     # Init Button
-    btn_load = ttk.Button(frm_init, width=50, text="Load policies from ROOT compartment only", command=load_policy_analysis_from_client)
+    btn_load = ttk.Button(frm_init, width=50, text="Load Policies and Dynamic Groups from ROOT compartment only", command=load_policy_analysis_from_client)
     btn_load.grid(row=0, column=4, columnspan=2, rowspan=2, sticky="ew", padx=25)
 
     # Progress Bar
@@ -448,7 +547,7 @@ if __name__ == "__main__":
     progressbar.place(x=450, y=50)
 
     # Filters
-    label_filter = tk.Label(master=frm_filter, text="Filters (Each filter supports | as OR) - Policy Syntax: allow <subject> to <verb> <resource> in <location> where <conditions>")
+    label_filter = tk.Label(master=frm_filter, text="Filters (Each filter supports | as OR) - Policy Syntax: allow <subject> to <verb> <resource> in <location> where <conditions> // Policy Comment")
     label_filter.grid(row=0, column=0, sticky="ew", columnspan=4, padx=5, pady=3)
 
     label_subj = ttk.Label(master=frm_filter, text="Subject\n(group name)")
@@ -482,9 +581,13 @@ if __name__ == "__main__":
     entry_condition.grid(row=3, column=3, sticky="ew", padx=5, pady=3)
 
     btn_update = ttk.Button(frm_filter, text="Update Filter", state=tk.DISABLED, command=update_output)
-    btn_update.grid(row=4, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
+    btn_update.grid(row=4, column=0, sticky="ew", padx=5, pady=3)
     btn_clear = ttk.Button(frm_filter, text="Clear Filters", state=tk.DISABLED, command=clear_filters)
-    btn_clear.grid(row=4, column=2, columnspan=2, sticky="ew", padx=5, pady=3)
+    btn_clear.grid(row=4, column=1, sticky="ew", padx=5, pady=3)
+    btn_file_load = ttk.Button(master=frm_filter, text="Load Filtered (File)", command=load_file)
+    btn_file_load.grid(row=4, column=2, sticky="ew", padx=5, pady=3)    
+    btn_save = ttk.Button(master=frm_filter, text="Save Filtered (File)", state=tk.DISABLED, command=save_file)
+    btn_save.grid(row=4, column=3, sticky="ew", padx=5, pady=3)    
 
     # Show my permissions - essentially a filter on my groups or location
     # show_only_my_user = tk.BooleanVar()
@@ -513,12 +616,9 @@ if __name__ == "__main__":
     show_service.grid(row=0, column=4, sticky="ew", padx=15, pady=3)
     show_resource.grid(row=0, column=5, sticky="ew", padx=15, pady=3)
     show_regular.grid(row=0, column=6, sticky="ew", padx=15, pady=3)
-
-    # Policy Window
-
-    btn_copy = ttk.Button(master=frm_output, text="Copy Selected", state=tk.DISABLED, command=copy_selected)
+    btn_copy = ttk.Button(master=frm_output, text="Copy Selected Row (Clipboard)", state=tk.DISABLED, command=copy_selected)
     btn_copy.grid(row=0, column=7, sticky="ew", padx=5, pady=3)    
-    
+
     # Define dg button but don't place it
     btn_dg = ttk.Button(master=frm_actions, text="Analyze Dynamic Group", state=tk.ACTIVE, command=analyze_dynamic_group)
 
@@ -528,27 +628,34 @@ if __name__ == "__main__":
     dg_label_filter = ttk.Label(master=frm_dyn_group_filter, text="Filters (Each filter supports | as OR) - Dynamic Group has Name and matching statements")
     dg_label_filter.grid(row=0, column=0, sticky="ew", columnspan=4, padx=5, pady=3)
 
-    dg_label_type = ttk.Label(master=frm_dyn_group_filter, text="Statement type")
-    dg_label_type.grid(row=1, column=0, sticky="ew", padx=5, pady=3)
+    dg_label_name = ttk.Label(master=frm_dyn_group_filter, text="Dynamic Group Name")
+    dg_label_name.grid(row=1, column=0, sticky="ew", padx=5, pady=3)
+    dg_entry_name = tk.Entry(master=frm_dyn_group_filter, state=tk.DISABLED, width=50)
+    dg_entry_name.grid(row=1, column=1, sticky="ew", padx=5, pady=3)
+
+    dg_label_type = ttk.Label(master=frm_dyn_group_filter, text="Statement type\nresource/compartment/instance etc")
+    dg_label_type.grid(row=1, column=2, sticky="ew", padx=5, pady=3)
     dg_entry_type = tk.Entry(master=frm_dyn_group_filter, state=tk.DISABLED, width=50)
-    dg_entry_type.grid(row=1, column=1, sticky="ew", padx=5, pady=3)
+    dg_entry_type.grid(row=1, column=3, sticky="ew", padx=5, pady=3)
 
     dg_label_ocid = ttk.Label(master=frm_dyn_group_filter, text="Statement OCID")
-    dg_label_ocid.grid(row=1, column=2, sticky="ew", padx=5, pady=3)
+    dg_label_ocid.grid(row=2, column=0, sticky="ew", padx=5, pady=3)
     dg_entry_ocid = tk.Entry(master=frm_dyn_group_filter, state=tk.DISABLED, width=50)
-    dg_entry_ocid.grid(row=1, column=3, sticky="ew", padx=5, pady=3)
+    dg_entry_ocid.grid(row=2, column=1, sticky="ew", padx=5, pady=3)
 
     dg_btn_update = ttk.Button(frm_dyn_group_filter, text="Update Filter", state=tk.DISABLED, command=update_output_dg)
-    dg_btn_update.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
+    dg_btn_update.grid(row=3, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
     dg_btn_clear = ttk.Button(frm_dyn_group_filter, text="Clear Filters", state=tk.DISABLED, command=clear_filters_dg)
-    dg_btn_clear.grid(row=2, column=2, columnspan=2, sticky="ew", padx=5, pady=3)
+    dg_btn_clear.grid(row=3, column=2, columnspan=2, sticky="ew", padx=5, pady=3)
 
     btn_dyn_group_inuse_analysis = ttk.Button(master=frm_dyn_group_actions, text="Run In Use Analysis", command=run_dynamic_group_inuse_analysis)
     btn_dyn_group_ocid_analysis = ttk.Button(master=frm_dyn_group_actions, text="Run OCID Analysis", command=run_dynamic_group_ocid_analysis)
-    
+    btn_dg_copy = ttk.Button(master=frm_dyn_group_actions, text="Copy Selected Row (Clipboard)", state=tk.DISABLED, command=copy_selected)
+
     # text_dg = tk.Text(master=frm_dyn_group_output)
     btn_dyn_group_inuse_analysis.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
     btn_dyn_group_ocid_analysis.grid(row=0, column=2, columnspan=2, sticky="ew", padx=5, pady=3)
+    btn_dg_copy.grid(row=0, column=4, columnspan=2, sticky="ew", padx=5, pady=3)    
 
     tree_dg = ttk.Treeview(master=frm_dyn_group_output, show=ttk.TREEHEADINGS, style='info.Treeview')
     tree_dg.pack(expand=True, fill=tk.BOTH)
@@ -558,10 +665,16 @@ if __name__ == "__main__":
     tree_dg.column("#0", stretch=False, width=220)
     tree_dg.column("Value", stretch=True)
     tree_dg.heading("#0", text="Name / Type", anchor=tk.W)
-    tree_dg.heading("Value", text="Value (Copy-able)", anchor=tk.W)
+    tree_dg.heading("Value", text="Value (Click to copy)", anchor=tk.W, command=copy_selected)
 
-    tree_policies = ttk.Treeview(master=frm_policy,show='tree')
+    tree_policies = ttk.Treeview(master=frm_policy, show=ttk.TREEHEADINGS, style='info.Treeview')
     tree_policies.pack(expand=True, fill=tk.BOTH, side= tk.TOP)
+
+    tree_policies["columns"] = ("Value")
+    tree_policies.column("#0", stretch=False, width=220)
+    tree_policies.column("Value", stretch=True)
+    tree_policies.heading("#0", text="Name / Type", anchor=tk.W)
+    tree_policies.heading("Value", text="Value (Click to copy)", anchor=tk.W, command=copy_selected)
 
     # Insert to main window
     frm_init.pack(expand=False, fill=tk.X, side=tk.TOP)
@@ -578,23 +691,14 @@ if __name__ == "__main__":
     # Add tabs
     tab_control.pack(expand=True, fill=tk.BOTH)
 
-    # Create the classes
-    #progressbar_val = tk.IntVar()
-    progress = Progress(progress_val=progressbar_val.get())
+    # Create the worker classes
+    progress = Progress(progress_val=0)
     policy_analysis = PolicyAnalysis(progress=progress,
                                      verbose=verbose)
     dyn_group_analysis = DynamicGroupAnalysis(progress=progress, verbose=False)
 
-    # Start UI
-    # window.mainloop()
-    while True:
-        update_progress()
+    # Start updating Progress Meter, using loop
+    update_progress()
 
-        # Poor man's event
-        if policy_analysis.finished:
-            update_output()
-            policy_analysis.finished = False
-            progressbar_val.set(0)
-        window.update_idletasks()
-        window.update()
-        time.sleep(0.1)
+    # Main Loop
+    window.mainloop()
