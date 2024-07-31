@@ -54,7 +54,6 @@ def enable_buttons():
     entry_policy.config(state=tk.NORMAL)
     btn_update.config(state=tk.ACTIVE)
     btn_clear.config(state=tk.ACTIVE)
-    #btn_copy.config(state=tk.ACTIVE)
     btn_load.config(state=tk.ACTIVE)
     btn_save.config(state=tk.ACTIVE)
     # input_my_user.config(state=tk.ACTIVE)
@@ -66,7 +65,6 @@ def enable_buttons():
     dg_entry_type.config(state=tk.NORMAL)
     dg_btn_clear.config(state=tk.ACTIVE)
     dg_btn_update.config(state=tk.ACTIVE)
-    btn_dg_copy.config(state=tk.ACTIVE)
 
 def load_policy_analysis_from_client():
     
