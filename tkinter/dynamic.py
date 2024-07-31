@@ -181,7 +181,7 @@ class DynamicGroupAnalysis:
             valid_dg = self.dg_in_use(dg=dg)
             self.logger.info(f"Valid: {dg[0]}: {valid_dg}")
 
-            new_tuple = (dg[0], dg[1], dg[2], dg[3], valid_dg, dg[5])
+            new_tuple = [dg[0], dg[1], dg[2], dg[3], valid_dg, dg[5]]
 
             # Now add to new list of DGs
             new_dynamic_groups.append(new_tuple)
@@ -222,7 +222,7 @@ class DynamicGroupAnalysis:
                     self.logger.debug(f"Rule: {dg[0]} Rule{i}:{j} ({is_ocid_valid}): {ocid.group(0)}")
                     if not is_ocid_valid:
                         broken_ocids.append(ocid.group(0))
-            new_tuple = (dg[0], dg[1], dg[2], dg[3], dg[4], broken_ocids)
+            new_tuple = [dg[0], dg[1], dg[2], dg[3], dg[4], broken_ocids]
 
             # Now add to new list of DGs
             new_dynamic_groups.append(new_tuple)
@@ -248,7 +248,7 @@ class DynamicGroupAnalysis:
         # Parse matching rule into a list
 
         # No validity data yet
-        return (dynamic_group.name, dynamic_group.id, statements, rules, True, [])
+        return [dynamic_group.name, dynamic_group.id, statements, rules, True, []]
     
     # Incoming call from outside (Entry Point)
     def load_all_dynamic_groups(self, use_cache: bool) -> bool:
@@ -293,5 +293,35 @@ class DynamicGroupAnalysis:
         '''Filter the list of DGs and return what is required'''
         self.logger.info(f"Filtering DG")
         filtered_dynamic_groups = []
+
+        # Split Name filter
+        split_name_filter = name_filter.split('|')
+        split_ocid_filter = ocid_filter.split('|')
+        split_type_filter = type_filter.split('|')
+        self.logger.info(f"Filtering: {split_name_filter}. Before: {len(self.dynamic_groups)} Dynamic Groups")
+        
+        # Name Filter
+        for filt in split_name_filter:
+            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[0].casefold(), self.dynamic_groups)))        
+        # filtered_dynamic_groups = self.dynamic_groups
+        self.logger.info(f"Filtering Name: {split_name_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
+
+        filtered_dynamic_groups_prev = filtered_dynamic_groups
+        filtered_dynamic_groups = []
+
+        # OCID Filter
+        for filt in split_ocid_filter:
+            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))        
+        # filtered_dynamic_groups = self.dynamic_groups
+        self.logger.info(f"Filtering OCID: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
+
+        filtered_dynamic_groups_prev = filtered_dynamic_groups
+        filtered_dynamic_groups = []
+
+        # Type Filter
+        for filt in split_type_filter:
+            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))        
+        # filtered_dynamic_groups = self.dynamic_groups
+        self.logger.info(f"Filtering Type: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
 
         return filtered_dynamic_groups
