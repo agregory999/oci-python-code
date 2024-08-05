@@ -1,5 +1,9 @@
 # Python
-import os, logging, json, re, time
+import os
+import logging
+import json
+import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 # OCI
@@ -7,7 +11,7 @@ from oci import config, pagination
 from oci.retry import DEFAULT_RETRY_STRATEGY
 from oci.identity import IdentityClient
 from oci.identity.models import DynamicGroup
-from oci.core import ComputeClient, VirtualNetworkClient
+from oci.core import ComputeClient
 from oci.database import DatabaseClient
 from oci.functions import FunctionsManagementClient
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
@@ -21,10 +25,12 @@ from progress import Progress
 ###############################################################################################################
 
 STATEMENT_REGEX = r'[\w.]+\s*=\s*\'[\w\s.]+\''
+THREADS = 8
 
 ###############################################################################################################
 # DynamicGroupAnalysis class
 ###############################################################################################################
+
 
 class DynamicGroupAnalysis:
 
@@ -34,29 +40,31 @@ class DynamicGroupAnalysis:
     def __init__(self, progress: Progress, verbose: bool):
         logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s [%(threadName)s] %(levelname)s %(message)s')
         self.logger = logging.getLogger('oci-policy-analysis-dynamic-groups')
-        self.logger.info(f"Init of class")
+        self.logger.info("Init of class")
         if verbose:
             self.logger.setLevel(logging.DEBUG)
 
-        self.logger.info(f"Initialized DynamicGroupAnalysis ")
+        self.logger.info("Initialized DynamicGroupAnalysis ")
 
         # Reference to progress object in main
         self.progress = progress
 
     # Just the Identity Client for now
     def initialize_client(self, profile: str, use_instance_principal: bool) -> bool:
+        """Initialize the Identity Client"""
+
         if use_instance_principal:
-            self.logger.info(f"Using Instance Principal Authentication")
-            self.config={}
+            self.logger.info("Using Instance Principal Authentication")
+            self.config = {}
             try:
                 self.signer = InstancePrincipalsSecurityTokenSigner()
-                
+
                 # Create the OCI Client to use
                 self.identity_client = IdentityClient(config={}, signer=self.signer, retry_strategy=DEFAULT_RETRY_STRATEGY)
                 self.tenancy_ocid = self.signer.tenancy_id
             except Exception as exc:
                 self.logger.fatal(f"Unable to use IP Authentication: {exc}")
-                return False 
+                return False
         else:
             self.logger.info(f"Using Profile Authentication: {profile}")
             self.signer = None
@@ -75,6 +83,7 @@ class DynamicGroupAnalysis:
 
     # Creation and caching of regional clients, needed for OCID validation in other regions
     def regional_client(self, region, type):
+        """Create and cache a regional OCI Client for any type or region"""
 
         # Get base config
         localconfig = self.config
@@ -84,11 +93,10 @@ class DynamicGroupAnalysis:
         if "instance" in type:
             # Check clients first (any one we have)
             for client in self.clients:
-                if region == client[0] and isinstance(client[1],ComputeClient):
+                if region == client[0] and isinstance(client[1], ComputeClient):
                     self.logger.debug(f"Matching client {region} / {type}")
                     return client[1]
             # Create compute
-            #cl = (region, ComputeClient(config=localconfig, signer=self.signer, region=region, retry_strategy=DEFAULT_RETRY_STRATEGY))
             cl = (region, ComputeClient(config=localconfig, region=region, retry_strategy=DEFAULT_RETRY_STRATEGY))
             self.clients.append(cl)
             self.logger.info(f"Created client {region} / {type}")
@@ -96,7 +104,7 @@ class DynamicGroupAnalysis:
         elif "dbsystem" in type or "autonomousdatabase" in type or "dbnode" in type or "cloudvmcluster" in type:
             # Check clients first (any one we have)
             for client in self.clients:
-                if region == client[0] and isinstance(client[1],DatabaseClient):
+                if region == client[0] and isinstance(client[1], DatabaseClient):
                     self.logger.debug(f"Matching client {region} / {type}")
                     return client[1]
             cl = (region, DatabaseClient(config=localconfig, region=region, retry_strategy=DEFAULT_RETRY_STRATEGY))
@@ -106,7 +114,7 @@ class DynamicGroupAnalysis:
         elif "fnfunc" in type or "fnapp" in type:
             # Check clients first (any one we have)
             for client in self.clients:
-                if region == client[0] and isinstance(client[1],FunctionsManagementClient):
+                if region == client[0] and isinstance(client[1], FunctionsManagementClient):
                     self.logger.debug(f"Matching client {region} / {type}")
                     return client[1]
             cl = (region, FunctionsManagementClient(config=localconfig, region=region, retry_strategy=DEFAULT_RETRY_STRATEGY))
@@ -116,7 +124,7 @@ class DynamicGroupAnalysis:
         else:
             return None
 
-    # OCID Checker - Return False if the object is not valid, True otherwise and if we cannot tell 
+    # OCID Checker - Return False if the object is not valid, True otherwise and if we cannot tell
     def validate_ocid(self, ocid: str) -> bool:
         '''Check the OCID and return False if it isn't a thing any more'''
 
@@ -127,7 +135,7 @@ class DynamicGroupAnalysis:
         try:
             # Based on type, use the configured client to see if it comes back with anything
             if "compartment" in ocid_type or "tenancy" in ocid_type:
-                a = self.identity_client.get_compartment(compartment_id=ocid)
+                self.identity_client.get_compartment(compartment_id=ocid)
             elif "instance" in ocid_type:
                 cl = self.regional_client(ocid_region, ocid_type)
                 cl.get_instance(instance_id=ocid)
@@ -148,6 +156,14 @@ class DynamicGroupAnalysis:
                 cl.get_application(application_id=ocid)
             # elif "dbnode" in ocid_type:
             #     a = self.database_client[ocid_region].get_db_node(db_node_id=ocid)
+            elif False:
+                pass
+                # To do
+                # datacatalog
+                # cloudexadatainfrastructure
+                # devopsbuildpipeline, devopsrepository, devopsdeploypipeline
+                # apigateway
+                # vault
             else:
                 self.logger.warning(f"Type of OCID not supported: {ocid_type}")
         except ServiceError as exc:
@@ -164,6 +180,8 @@ class DynamicGroupAnalysis:
 
     # Check a single DG for in use (requires PolicyAnalysis instance)
     def dg_in_use(self, dg: DynamicGroup) -> bool:
+        """Determine if a DG is in use within any policy statement"""
+
         for statement in self.policies:
             if dg[0].casefold() in statement[4].casefold():
                 self.logger.debug(f"DG {dg[0]} referenced by statement {statement}")
@@ -172,75 +190,108 @@ class DynamicGroupAnalysis:
         return False
 
     # See if any DG isn't in use by any policy
-    def run_dg_in_use_analysis(self):
+    def run_dg_in_use_analysis(self) -> list:
+        """Use the policy statements to generate a list of delete-able DG"""
 
-        new_dynamic_groups = []
+        unused_dynamic_groups = []
         # Iterate rules to look for broken OCIDs and add to tuple
         for i, dg in enumerate(self.dynamic_groups):
             self.logger.debug(f"Validate DG {dg[0]}")
             valid_dg = self.dg_in_use(dg=dg)
             self.logger.info(f"Valid: {dg[0]}: {valid_dg}")
 
-            new_tuple = [dg[0], dg[1], dg[2], dg[3], valid_dg, dg[5]]
+            # Set in existing DG
+            dg[4] = valid_dg
 
-            # Now add to new list of DGs
-            new_dynamic_groups.append(new_tuple)
-        
-        # Replace DGs with new list of tuples
-        self.dynamic_groups = new_dynamic_groups
-        self.logger.info(f"Finished DG in Use analysis")
+            # If false, add to return list
+            if not valid_dg:
+                unused_dynamic_groups.append(dg)
+
+        # Return the invalid list
+        self.logger.info(f"Finished DG in Use analysis, found {len(unused_dynamic_groups)} unused groups")
+        return unused_dynamic_groups
+
+    # Threadable method to take a DG list (our object) and populate the invalid ocids
+    def invalid_ocid_check(self, dg: list):
+        """Given a DG (as internal list representation), update it if any OCID is invalid. Run as a thread"""
+
+        self.logger.debug(f"Thread Started on {dg[0]}")
+
+        # Could be multiple rules and thus multiple OCIDs
+        for i, rule in enumerate(dg[3]):
+            ocid_regex = r"ocid1\.\w+\.\w+\.\w*\.\w+"
+            ocid = re.search(ocid_regex, rule)
+            if ocid and ocid.group(0):
+
+                # To do threading here, add to ocid_list
+                # then we'd need to run threads against the validation
+                # Each future would then need to be processed.
+                is_ocid_valid = self.validate_ocid(ocid.group(0))
+                self.logger.debug(f"Rule {i}: {dg[0]} ({is_ocid_valid}): {ocid.group(0)}")
+                if not is_ocid_valid:
+                    self.logger.debug(f"Marking {ocid.group(0)} as invalid")
+                    dg[5].append(ocid.group(0))
+        self.logger.debug(f"Thread finished on {dg[0]}")
 
     # Process all DG Matching rules and look all valid OCIDs
     def run_deep_analysis(self):
+        """Control the threaded process of checking each Dynamic Group for invalid OCIDs"""
 
         # We know the DG count now - set up progress
         self.progress.set_to_load(len(self.dynamic_groups))
 
-        new_dynamic_groups = []
+        # new_dynamic_groups = []
 
         # Start timer
         tic = time.perf_counter()
 
-        # Iterate rules to look for broken OCIDs and add to DG tuple
-        for i, dg in enumerate(self.dynamic_groups):
-            rule = dg[2]
-            self.logger.debug(f"\n---Rule: {dg[0]} Rule{i}: {dg[2]}")
+        # # Iterate rules to look for broken OCIDs and add to DG tuple
+        # for i, dg in enumerate(self.dynamic_groups):
+        #     rule = dg[2]
+        #     self.logger.debug(f"\n---Rule: {dg[0]} Rule{i}: {dg[2]}")
 
-            # Set broken OCID list empty
-            broken_ocids = []
+        with ThreadPoolExecutor(max_workers=THREADS, thread_name_prefix="thread") as executor:
+            # results = executor.map(self.load_policies, comp_list)
+            results = [executor.submit(self.invalid_ocid_check, dg) for dg in self.dynamic_groups]
+            self.logger.info(f"Kicked off {THREADS} threads for parallel execution - adjust as necessary")
 
-            # Could be multiple rules and thus multiple OCIDs
-            for j,rule in enumerate(dg[3]):
-                ocid_regex = r"ocid1\.\w+\.\w+\.\w*\.\w+"
-                ocid = re.search(ocid_regex, rule)
-                if ocid and ocid.group(0):
+            # Add callbacks to report
+            for future in results:
+                # future.add_done_callback(print)
+                if self.progress:
+                    future.add_done_callback(self.progress.progress_indicator)
 
-                    # To do threading here, add to ocid_list
-                    # then we'd need to run threads against the validation
-                    # Each future would then need to be processed.
-                    is_ocid_valid = self.validate_ocid(ocid.group(0))
-                    self.logger.debug(f"Rule: {dg[0]} Rule{i}:{j} ({is_ocid_valid}): {ocid.group(0)}")
-                    if not is_ocid_valid:
-                        broken_ocids.append(ocid.group(0))
-            new_tuple = [dg[0], dg[1], dg[2], dg[3], dg[4], broken_ocids]
+        # Process Threaded Results
+        for future in results:
+            self.logger.debug(f"Result: {future}")
+            try:
+                future.result()
+            except Exception as exc:
+                self.logger.error(f"Executor Exception: {exc}")
 
-            # Now add to new list of DGs
-            new_dynamic_groups.append(new_tuple)
-        
-            # Update Progress
-            self.progress.progress_indicator(None)
+        # Set progress back to 0
+        self.progress.progressbar_val = 0.0
+
         # Stop Timer
         toc = time.perf_counter()
 
         # Replace DGs with new list of tuples
-        self.dynamic_groups = new_dynamic_groups
+        # self.dynamic_groups = new_dynamic_groups
         self.logger.info(f"Finished deep analysis in {toc-tic}s")
-                    
+
     # Parse Dynamic Group into tuple
     def parse_dynamic_group(self, dynamic_group: DynamicGroup) -> tuple:
-        # Name, ocid, statements, ocids? 
-        # Statements is a list of parsed statements
-        # All Rules (no hierarchy)
+        """Parse an OCI Dynamic Group into the various components for the internal representation
+        Name
+        OCID
+        Matching Rules
+        In Use (bool)
+        Invalid OCIDs (list)
+        time_created
+        """
+
+        # Grab the creation time in string
+        time_created = dynamic_group.time_created.strftime("%m/%d/%Y %H:%M:%S")
 
         statements = dynamic_group.matching_rule
         statement_regex = r'[\w.]+\s*=\s*\'[\w\s.]+\''
@@ -248,27 +299,28 @@ class DynamicGroupAnalysis:
         # Parse matching rule into a list
 
         # No validity data yet
-        return [dynamic_group.name, dynamic_group.id, statements, rules, True, []]
-    
+        return [dynamic_group.name, dynamic_group.id, statements, rules, True, [], time_created]
+
     # Incoming call from outside (Entry Point)
     def load_all_dynamic_groups(self, use_cache: bool) -> bool:
+        """Load all dynamic groups in tenancy, using the configured Identity Client"""
+
+        self.dynamic_groups = []
 
         if use_cache:
             self.logger.info(f"---Starting DG Load for tenant: {self.tenancy_ocid} from cached files---")
             if os.path.isfile(f'./.dynamic-group-cache-{self.tenancy_ocid}.dat'):
                 with open(f'./.dynamic-group-cache-{self.tenancy_ocid}.dat', 'r') as filehandle:
                     self.dynamic_groups = json.load(filehandle)
- 
+
         else:
             self.logger.info(f"---Starting DG Load for tenant: {self.tenancy_ocid} from client---")
             # Load them all from client
             paginated_response = pagination.list_call_get_all_results(
                 self.identity_client.list_dynamic_groups,
-                        compartment_id=self.tenancy_ocid,
-                        limit=1000
+                compartment_id=self.tenancy_ocid,
+                limit=1000
             ).data
-
-            #self.dynamic_groups.extend(paginated_response.data)
 
             # Print what we have (if verbose)
             for i, dg in enumerate(paginated_response):
@@ -279,30 +331,33 @@ class DynamicGroupAnalysis:
             # # Dump new cache
             with open(f'.dynamic-group-cache-{self.tenancy_ocid}.dat', 'w') as filehandle:
                 json.dump(self.dynamic_groups, filehandle)
-        
+
         # Done
         self.logger.info(f"---Finished DG Load ({len(self.dynamic_groups)}) for tenant: {self.tenancy_ocid} ---")
         return True
 
     # Set the statements
     def set_statements(self, statements: list):
-        # Set the policies in place
+        """Set the policies in place"""
+
         self.policies = statements
 
+    # Filter Dynamic Groups for display
     def filter_dynamic_groups(self, name_filter: str, type_filter: str, ocid_filter: str) -> list:
         '''Filter the list of DGs and return what is required'''
-        self.logger.info(f"Filtering DG")
+
+        self.logger.debug(f"Filtering DG with name filter: {name_filter}, type filter: {type_filter}, ocid filter: {ocid_filter}")
         filtered_dynamic_groups = []
 
         # Split Name filter
         split_name_filter = name_filter.split('|')
         split_ocid_filter = ocid_filter.split('|')
         split_type_filter = type_filter.split('|')
-        self.logger.info(f"Filtering: {split_name_filter}. Before: {len(self.dynamic_groups)} Dynamic Groups")
-        
+        self.logger.debug(f"Filtering: {split_name_filter}. Before: {len(self.dynamic_groups)} Dynamic Groups")
+
         # Name Filter
         for filt in split_name_filter:
-            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[0].casefold(), self.dynamic_groups)))        
+            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[0].casefold(), self.dynamic_groups)))
         # filtered_dynamic_groups = self.dynamic_groups
         self.logger.info(f"Filtering Name: {split_name_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
 
@@ -311,7 +366,7 @@ class DynamicGroupAnalysis:
 
         # OCID Filter
         for filt in split_ocid_filter:
-            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))        
+            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))
         # filtered_dynamic_groups = self.dynamic_groups
         self.logger.info(f"Filtering OCID: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
 
@@ -320,8 +375,7 @@ class DynamicGroupAnalysis:
 
         # Type Filter
         for filt in split_type_filter:
-            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))        
+            filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))
         # filtered_dynamic_groups = self.dynamic_groups
         self.logger.info(f"Filtering Type: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
-
         return filtered_dynamic_groups
