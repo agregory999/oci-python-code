@@ -2,17 +2,17 @@
 import tkinter as tk
 #import tkinter.ttk as ttk
 import ttkbootstrap as ttk
+
 from ttkbootstrap.constants import *
 from tkinter.filedialog import askopenfilename, asksaveasfilename
+from tkinter import font
 from tksheet import Sheet
 
 # Python
 import json
 from pathlib import Path
-import os
 import logging
-from threading import Lock, Thread
-import time
+from threading import Thread
 import csv
 import copy
 import datetime
@@ -33,17 +33,20 @@ progressbar_val = None
 
 POLICY_TAB_NAME = "Policy Statement View"
 DG_TAB_NAME = "Dynamic Group View"
+WORK_TAB_NAME = "Work Items"
 
 ###############################################################################################################
 # Main Functions (UI and helper)
 ###############################################################################################################
 
+# Load all policies in a thread
 def load_policy_analysis_thread():
-    # Load Statements
+    """Load Statements in a thread"""
     policy_analysis.load_policies_from_client()
 
+# Enable UI buttons after loading data
 def enable_buttons():
-    # Light up Policy filter widgets
+    """Light up (enable) Policy filter widgets"""
     entry_subj.config(state=tk.NORMAL)
     entry_loc.config(state=tk.NORMAL)
     entry_res.config(state=tk.NORMAL)
@@ -56,6 +59,7 @@ def enable_buttons():
     btn_clear.config(state=tk.ACTIVE)
     btn_load.config(state=tk.ACTIVE)
     btn_save.config(state=tk.ACTIVE)
+    btn_cons.config(state=tk.ACTIVE)
     # input_my_user.config(state=tk.ACTIVE)
     # input_my_compartment.config(state=tk.ACTIVE)
 
@@ -66,9 +70,10 @@ def enable_buttons():
     dg_btn_clear.config(state=tk.ACTIVE)
     dg_btn_update.config(state=tk.ACTIVE)
 
+# Load data from OCI tenancy or cache - kicks off a thread to do this in background
 def load_policy_analysis_from_client():
-    
-    # Initialize client
+    """Initialize identity client - kicks off a thread"""
+
     policy_analysis.initialize_client(profile=profile.get(),
                                       use_instance_principal=use_instance_principal.get(),
                                       use_cache=use_cache.get(),
@@ -88,8 +93,10 @@ def load_policy_analysis_from_client():
     update_output_dg()
     enable_buttons()
 
+# Process the toggle of Using Instance Principal
 def select_instance_principal():
     '''Update variable in class'''
+
     # Disable UI for selection of profile
     if use_instance_principal.get():
         logger.info("Using Instance Principal - disable profile")
@@ -98,8 +105,10 @@ def select_instance_principal():
         logger.info("Using Config")
         input_profile.config(state=tk.ACTIVE)
 
+# Clear all filters on Policy View Screen
 def clear_filters():
     '''Clears the Policy filters and updates the UI'''
+
     logger.info(f"Clearing Filters")
     entry_subj.delete(0, tk.END)
     entry_verb.delete(0, tk.END)
@@ -115,6 +124,7 @@ def clear_filters():
     # Update the output
     update_output()
 
+# Clear all filters on Dynamic Group View Screen
 def clear_filters_dg():
     '''Clears the Dynamic Group Filters and updates the UI'''
     logger.info(f"Clearing DG Filters")
@@ -149,8 +159,8 @@ def update_output():
 
     rows_to_show = []
     for index, statement in enumerate(regular_statements_filtered, start=0):
-        # Other / Special
-        if chk_show_special.get() and (statement[6] == "define" or statement[6] == "endorse"):
+        # Other / Special / Cross
+        if chk_show_special.get() and (statement[6] == "define" or statement[4].startswith("endorse")  or statement[4].startswith("admin")):
             rows_to_show.append(index)
         # Service
         if chk_show_service.get() and statement[6] == "service":
@@ -165,9 +175,13 @@ def update_output():
         if chk_show_regular.get() and (statement[6] == "group" or statement[6] == "any-user" or statement[6] == "any-group"):
             rows_to_show.append(index)
 
+        # Look for issues and highlight
+        if not statement[5]:
+            sheet_policies.highlight_cells(row=index, column='all', bg="pink")
+
     # Only display the rows in scope
     sheet_policies.display_rows(rows=rows_to_show, all_displayed = False)
-    
+
     # Clean output and Update Count
     label_loaded.config(text=f"Statements (Filtered): {len(regular_statements_filtered)}\n"+ \
                         f"Statements (Shown): {len(rows_to_show)}"
@@ -257,39 +271,62 @@ def analyze_dynamic_group():
     # Get name of DG from policy
     current_selection = sheet_policies.get_currently_selected()
     if current_selection:
-        logger.info(f"Selected: {current_selection.row} / {current_selection.column}")
+        logger.info(f"Selected r/c: {current_selection.row} / {current_selection.column}")
+        logger.info(f"Selected row data: {sheet_policies.displayed_row_to_data(current_selection.row)}")
+        selected_row = sheet_policies.displayed_row_to_data(current_selection.row)
+        selected_column = sheet_policies.displayed_column_to_data(current_selection.column)
+        subject_type = sheet_policies.data[selected_row][6]
+        subject = sheet_policies.data[selected_row][7]
+        logger.info(f"Selected data: {sheet_policies.data[selected_row][selected_column]}")
 
-        subject_type_box = (current_selection.row, current_selection.column)
-        subject_box = (current_selection.row, current_selection.column)
-        subject_type = sheet_policies[subject_type_box].data
-        subject = sheet_policies[subject_box].data
-        logger.info(f"Selected: {subject_type} / {subject}")
+        # subject_type_box = (current_selection.row, current_selection.column)
+        # subject_box = (current_selection.row, current_selection.column)
+        # subject_type = sheet_policies[subject_type_box].data
+        # subject = sheet_policies[subject_box].data
+        # logger.info(f"Selected: {subject_type} / {subject}")
         if subject_type == "dynamic-group":
             # Switch to DG and enable filter
             dg_entry_name.insert(0,subject)
-        tab_control.select(".!notebook.!frame2")
+            tab_control.select(".!notebook.!frame2")
+            update_output_dg()
 
-    # logger.info(f"Called Dynamic Group analysis: {copied_string}")
+    logger.info(f"Called Dynamic Group analysis")
 
     # Parse Statement Again
 
 def run_dynamic_group_inuse_analysis():
+    """Let the DG class handle this"""
     # Set Statements
     dyn_group_analysis.set_statements(policy_analysis.regular_statements)
     # Run the anlaysis
-    dyn_group_analysis.run_dg_in_use_analysis()
+    unused_dynamic_groups = dyn_group_analysis.run_dg_in_use_analysis()
+
+    text_work.delete('1.0', tk.END)
+    for dg in unused_dynamic_groups:
+        oci_command = f"# Delete Dynamic Group {dg[0]}\noci iam dynamic-group delete --dynamic-group-id {dg[1]}\n"
+        text_work.insert(tk.END, oci_command)
 
     update_output_dg()
-    logger.info(f"Ran DG In Use Analysis from UI")
+    logger.info(f"Ran DG In Use Analysis from UI - Unused: {len(unused_dynamic_groups)}")
 
 def run_dynamic_group_ocid_analysis():
     # Set Statements
     dyn_group_analysis.set_statements(policy_analysis.regular_statements)
-    # Run the anlaysis
-    dyn_group_analysis.run_deep_analysis()
+    # Run the anlaysis in a thread
+    bg_thread = Thread(target=dyn_group_analysis.run_deep_analysis)
+    bg_thread.start()
+
+    # dyn_group_analysis.run_deep_analysis()
 
     update_output_dg()
     logger.info(f"Ran DG OCID Analysis from UI")
+
+def run_policy_dynamic_group_analysis():
+    """Check each DG-based policy statement to see if the DG exists, and if it is valid"""
+    logger.info(f"Calling Policy DG Analysis")
+    policy_analysis.check_for_invalid_dynamic_groups(dynamic_groups=dyn_group_analysis.dynamic_groups)
+    update_output()
+    logger.info(f"Called Policy DG Analysis")
 
 # Check progress meter for updates
 def update_progress():
@@ -397,6 +434,16 @@ def save_file():
                 csv_writer.writerow([st[0], st[1], st[3], f"{st[4]}", st[6], st[7], st[8], st[9], st[10], st[12], st[13], st[14]])
     logger.info(f"Finished writing file: {filepath}")
 
+def add_new_tab():
+    tab_consolidation = ttk.Frame(tab_control)
+    tab_control.add(tab_consolidation, text="Consolidation")
+    current_selection = sheet_policies.get_selected_rows()
+    logger.info(f"Selected data: {current_selection}")
+    if current_selection:
+        for row in current_selection:
+            # selected_row = sheet_policies.displayed_row_to_data(current_selection.row)
+            logger.info(f"Selected data: {sheet_policies.get_data(row)}")
+
 ########################################
 # Main Code
 # Pre-and Post-processing
@@ -453,9 +500,11 @@ if __name__ == "__main__":
     tab_control = ttk.Notebook(window)
     tab_policy = ttk.Frame(tab_control)
     tab_dg = ttk.Frame(tab_control)
+    tab_work_items = ttk.Frame(tab_control)
 
     tab_control.add(tab_policy, text=POLICY_TAB_NAME)
     tab_control.add(tab_dg, text=DG_TAB_NAME)
+    tab_control.add(tab_work_items, text=WORK_TAB_NAME)
     logger.debug(f"Tab: {tab_control}")
     # Frames
     frm_init = ttk.Frame(window, borderwidth=2)
@@ -580,7 +629,7 @@ if __name__ == "__main__":
     chk_show_resource = tk.BooleanVar()
     chk_show_regular = tk.BooleanVar(value=True)
     chk_show_expanded = tk.BooleanVar(value=False)
-    show_special = ttk.Checkbutton(frm_output, text='Show Special', variable=chk_show_special, command=update_output)
+    show_special = ttk.Checkbutton(frm_output, text='Show Cross-Tenancy', variable=chk_show_special, command=update_output)
     show_dynamic = ttk.Checkbutton(frm_output, text='Show Dynamic', variable=chk_show_dynamic, command=update_output)
     show_service = ttk.Checkbutton(frm_output, text='Show Service', variable=chk_show_service, command=update_output)
     show_resource = ttk.Checkbutton(frm_output, text='Show Resource', variable=chk_show_resource, command=update_output)
@@ -593,6 +642,9 @@ if __name__ == "__main__":
     show_regular.grid(row=0, column=6, sticky="ew", padx=15, pady=3)
     show_expanded.grid(row=0, column=7, sticky="ew", padx=15, pady=3)
   
+    btn_cons = ttk.Button(master=frm_output, text="Consolidate", state=tk.DISABLED, command=add_new_tab)
+    btn_cons.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
+
 
     # Define dg button but don't place it
     btn_dg = ttk.Button(master=frm_actions, text="Analyze Dynamic Group", state=tk.ACTIVE, command=analyze_dynamic_group)
@@ -639,7 +691,7 @@ if __name__ == "__main__":
                         #    displayed_columns=([0,3,4], False),
                            headers=("Policy Name","Policy OCID","Compartment OCID","Hierarchy","Statement Text", "Valid",
                                     "Subject Type","Subject","Verb","Resource","Permission","Location Type","Location",
-                                    "Conditions","Comments"),
+                                    "Conditions","Comments","Creation Time"),
                            )
     
     sheet_policies.set_options(auto_resize_columns=150)
@@ -649,8 +701,10 @@ if __name__ == "__main__":
                                    "ctrl_select", 
                                    "right_click_popup_menu", # Right click menu
                                    "copy", # Copy/paste
-                                   "shift_cell_select" # Shift Cell
+                                   "shift_cell_select", # Shift Cell
+                                   "row_select" # Select rows
     )
+    sheet_policies.popup_menu_add_command("Analyze Dynamic Group Statements", run_policy_dynamic_group_analysis)    # Insert to main window
     sheet_policies.popup_menu_add_command("Analyze Dynamic Group", analyze_dynamic_group)    # Insert to main window
     sheet_policies.popup_menu_add_command("Save csv", save_file)    # Insert to main window
     sheet_policies.pack(expand=True, fill=tk.BOTH, side= tk.TOP)
@@ -662,7 +716,7 @@ if __name__ == "__main__":
                            header_font=("Courier New", 11, "bold"),
                            index_font=("Courier New", 11, "bold"),
                         #    displayed_columns=([0,3,4], False),
-                           headers=("Dynamic Group Name","Dynamic Group OCID","Matching Statement","Rule Component","DG In Use", "Invalid OCIDs")
+                           headers=("Dynamic Group Name","Dynamic Group OCID","Matching Statement","Rule Component","DG In Use", "Invalid OCIDs", "Creation Time")
     )
     
     sheet_dynamic_group.set_options(auto_resize_columns=150)
@@ -688,6 +742,10 @@ if __name__ == "__main__":
     frm_dyn_group_actions.pack(expand=False, fill=tk.BOTH)
     frm_dyn_group_output.pack(expand=True, fill=tk.BOTH)
  
+    # Work Items Tab
+    text_work = ttk.Text(master=tab_work_items, font="TkFixedFont")
+    text_work.pack(expand=True, fill=tk.BOTH)
+
     # Add tabs
     tab_control.pack(expand=True, fill=tk.BOTH)
 

@@ -32,7 +32,7 @@ class PolicyAnalysis:
 
     regular_statements = []
 
-    # Use like a global to indicate if it is running a threaded load.  When finished, this goes to True, and then 
+    # Use like a global to indicate if it is running a threaded load.  When finished, this goes to True, and then
     # the main class does an update and sets this back to false.  Probably a better way
     finished = False
 
@@ -43,7 +43,7 @@ class PolicyAnalysis:
         # Create a logger
         logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s [%(threadName)s] %(levelname)s %(message)s')
         self.logger = logging.getLogger('oci-policy-analysis-policies')
-        self.logger.info(f"Init of class")
+        self.logger.info("Init of class")
         if verbose:
             self.logger.setLevel(logging.DEBUG)
 
@@ -53,6 +53,7 @@ class PolicyAnalysis:
     # Class Initializer
     def initialize_client(self, profile: str, use_instance_principal: bool, use_recursion: bool, use_cache: bool) -> bool:
         """Set up the OCI client (Identity)"""
+
         # Grab variables required
         self.use_recursion = use_recursion
         self.use_cache = use_cache
@@ -63,13 +64,13 @@ class PolicyAnalysis:
             self.logger.info("Using Instance Principal Authentication")
             try:
                 signer = InstancePrincipalsSecurityTokenSigner()
-                
+
                 # Create the OCI Client to use
                 self.identity_client = IdentityClient(config={}, signer=signer, retry_strategy=DEFAULT_RETRY_STRATEGY)
                 self.tenancy_ocid = signer.tenancy_id
             except Exception as exc:
                 self.logger.fatal(f"Unable to use IP Authentication: {exc}")
-                return False 
+                return False
         else:
             self.logger.info(f"Using Profile Authentication: {self.profile}")
             try:
@@ -84,7 +85,7 @@ class PolicyAnalysis:
                 return False
         self.logger.info(f"Set up Identity Client for tenancy: {self.tenancy_ocid}")
         return True
-    
+
     def parse_statement(self, statement: str, comp_string: str, policy: Policy) -> list:
         '''Parses policy statement into list
            0 - policy name
@@ -97,20 +98,20 @@ class PolicyAnalysis:
            7 - subject
            8 - verb
            9 - resource
-           10 - perms, 
+           10 - permissions
            11 - location-type
            12 - location
            13 - conditions
            14 - optional (Comments at end)
            15 - created time
         '''
- 
+
         # Grab the creation time in string
         time_created = policy.time_created.strftime("%m/%d/%Y %H:%M:%S")
 
         # Use case-insensitive and multi-line
-        result = re.search(pattern=POLICY_REGEX, 
-                           string=statement, 
+        result = re.search(pattern=POLICY_REGEX,
+                           string=statement,
                            flags=re.IGNORECASE|re.MULTILINE
                            )
         if result:
@@ -232,14 +233,10 @@ class PolicyAnalysis:
         # self.dynamic_group_statements = []
         # self.service_statements = []
         self.regular_statements = []
-        self.special_statements = []
 
         # If cached, load that and be done
         if self.use_cache:
             self.logger.info(f"---Starting Policy Load for tenant: {self.tenancy_ocid} from cached files---")
-            if os.path.isfile(f'./.policy-special-cache-{self.tenancy_ocid}.dat'):
-                with open(f'./.policy-special-cache-{self.tenancy_ocid}.dat', 'r') as filehandle:
-                    self.special_statements = json.load(filehandle)
             if os.path.isfile(f'.policy-statement-cache-{self.tenancy_ocid}.dat'):
                 with open(f'./.policy-statement-cache-{self.tenancy_ocid}.dat', 'r') as filehandle:
                     self.regular_statements = json.load(filehandle)
@@ -299,25 +296,23 @@ class PolicyAnalysis:
                         self.logger.error(f"Executor Exception: {exc}")
                 
                 # Set progress back to 0
-                self.progress.progressbar_val = 0.0
+                if self.progress:
+                    self.progress.progressbar_val = 0.0
 
                 # Stop timer
                 toc = time.perf_counter()
-                self.logger.info(f"Loaded {len(self.special_statements)}/{len(self.regular_statements)} special/regular policy statements on {THREADS} threads in {toc-tic:.2f}s")
+                self.logger.info(f"Loaded {len(self.regular_statements)} regular policy statements on {THREADS} threads in {toc-tic:.2f}s")
 
             else:
                 self.logger.info(f"Loading policies on main thread")
                 for c in comp_list:
                     self.load_policies(compartment=c)
                 toc = time.perf_counter()
-                self.logger.info(f"Loaded {len(self.special_statements)}/{len(self.regular_statements)} special/regular policy statements on main thread in {toc-tic:.2f}s")
+                self.logger.info(f"Loaded /{len(self.regular_statements)} regular policy statements on main thread in {toc-tic:.2f}s")
 
             self.logger.info(f"---Finished Policy Load from client---")
 
             # Dump in local cache for later
-
-            with open(f'.policy-special-cache-{self.tenancy_ocid}.dat', 'w') as filehandle:
-                json.dump(self.special_statements, filehandle)
             with open(f'.policy-statement-cache-{self.tenancy_ocid}.dat', 'w') as filehandle:
                 json.dump(self.regular_statements, filehandle)
         

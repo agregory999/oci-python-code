@@ -139,3 +139,9 @@ sudoku-backtracing.py
 sudoku-bitmask.py
 sudoku-crosshatch-backtracing.py
 sudoku-naive.py
+tkinter/tksheet-basic.py
+tkinter/tksheet-dropdown.py
+tkinter/tksheet-edits.py
+tkinter/tksheet-listbox.py
+tkinter/tksheet-readme.py
+tkinter/.dynamic-group-cache-*

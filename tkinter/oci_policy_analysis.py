@@ -24,6 +24,7 @@ from oci import loggingingestion
 import argparse
 import json
 import logging
+import datetime
 
 from policy import PolicyAnalysis
 from dynamic import DynamicGroupAnalysis
@@ -43,11 +44,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
     parser.add_argument("-pr", "--profile", help="Config Profile, named", default="DEFAULT")
-    #parser.add_argument("-o", "--ocid", help="OCID of compartment (if not passed, will use tenancy OCID from profile)", default="TENANCY")
     parser.add_argument("-sf", "--subjectfilter", help="Filter all statement subjects by this text")
     parser.add_argument("-vf", "--verbfilter", help="Filter all verbs (inspect,read,use,manage) by this text")
     parser.add_argument("-rf", "--resourcefilter", help="Filter all resource (eg database or stream-family etc) subjects by this text")
-    parser.add_argument("-lf", "--locationfilter", help="Filter all location (eg compartment name) subjects by this text")
+    parser.add_argument("-lf", "--locationfilter", help="Filter all location (eg compartment name)")
+    parser.add_argument("-hf", "--hierarchyfilter", help="Filter by compartment hierarchy (eg compartment in tree)")
+    parser.add_argument("-cf", "--conditionfilter", help="Filter by Condition")
+    parser.add_argument("-pf", "--policynamefilter", help="Filter by Policy Name")
     parser.add_argument("-r", "--recurse", help="Recursion or not (default True)", action="store_true")
     parser.add_argument("-c", "--usecache", help="Load from local cache (if it exists)", action="store_true")
     parser.add_argument("-w", "--writejson", help="Write filtered output to JSON", action="store_true")
@@ -57,13 +60,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
     verbose = args.verbose
     use_cache = args.usecache
-    #ocid = args.ocid
     profile = args.profile
     threads = args.threads
     sub_filter = args.subjectfilter
     verb_filter = args.verbfilter
     resource_filter = args.resourcefilter
     location_filter = args.locationfilter
+    hierarchy_filter = args.hierarchyfilter
+    condition_filter = args.conditionfilter
+    policy_name_filter = args.policynamefilter
     recursion = args.recurse
     write_json_output = args.writejson
     use_instance_principals = args.instanceprincipal
@@ -94,57 +99,43 @@ if __name__ == "__main__":
                                                                    verb_filter=verb_filter if verb_filter else "",
                                                                    resource_filter=resource_filter if resource_filter else "",
                                                                    location_filter=location_filter if location_filter else "",
-                                                                   hierarchy_filter="",
-                                                                   condition_filter="")
+                                                                   hierarchy_filter=hierarchy_filter if hierarchy_filter else "",
+                                                                   condition_filter=condition_filter if condition_filter else "",
+                                                                   text_filter="",
+                                                                   policy_filter=policy_name_filter if policy_name_filter else "")
     
-    # json_pol = json.dumps(policy_analysis.regular_statements, indent=2)
     json_pol = json.dumps(filtered_statements, indent=2)
     logger.info(json_pol)
 
-    # Initialize DG
-    dynamic_group_analysis = DynamicGroupAnalysis(progress=None,
-                                                  verbose=verbose)
+    # # Initialize DG
+    # dynamic_group_analysis = DynamicGroupAnalysis(progress=None,
+    #                                               verbose=verbose)
     
-    dynamic_group_analysis.initialize_client(profile=profile,
-                                             use_instance_principal=use_instance_principals)
+    # dynamic_group_analysis.initialize_client(profile=profile,
+    #                                          use_instance_principal=use_instance_principals)
     
-    dynamic_group_analysis.load_all_dynamic_groups(use_cache=use_cache)
+    # dynamic_group_analysis.load_all_dynamic_groups(use_cache=use_cache)
 
-    json_dg = json.dumps(dynamic_group_analysis.dynamic_groups, indent=2)
-    logger.info(json_dg)
+    # json_dg = json.dumps(dynamic_group_analysis.dynamic_groups, indent=2)
+    # logger.info(json_dg)
 
 
     # # To output file if required
-    # if write_json_output:
-    #     # Empty Dictionary
-    #     statements_list = []
-    #     for i, s in enumerate(special_statements):
-    #         statements_list.append({"type": "special", "statement": s[0],
-    #                                 "lineage": {"policy-compartment-ocid": s[4], "policy-relative-hierarchy": s[1],
-    #                                             "policy-name": s[2], "policy-ocid": s[3]}
-    #                                 })
-    #     for i, s in enumerate(dynamic_group_statements):
-    #         statements_list.append({"type": "dynamic-group", "subject": s[0], "verb": s[1],
-    #                                 "resource": s[2], "location": s[3], "conditions": s[4],
-    #                                 "lineage": {"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],
-    #                                             "policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}
-    #                                 })
-    #     for i, s in enumerate(service_statements):
-    #         statements_list.append({"type": "service", "subject": s[0], "verb": s[1],
-    #                                 "resource": s[2], "location": s[3], "conditions": s[4],
-    #                                 "lineage": {"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],
-    #                                             "policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}
-    #                                 })
-    #     for i, s in enumerate(regular_statements):
-    #         statements_list.append({"type": "regular", "subject": s[0], "verb": s[1],
-    #                                 "resource": s[2], "location": s[3], "conditions": s[4],
-    #                                 "lineage": {"policy-compartment-ocid": s[8], "policy-relative-hierarchy": s[5],
-    #                                             "policy-name": s[6], "policy-ocid": s[7], "policy-text": s[9]}
-    #                                 })
-    #     # Serializing json
-    #     json_object = json.dumps(statements_list, indent=2)
+    if write_json_output:
+        save_details = { "save-date" : str(datetime.datetime.now()),
+                    "subject-filter" : sub_filter,
+                    "verb-filter": verb_filter,
+                    "resource-filter": resource_filter,
+                    "location-filter": location_filter,
+                    "hierarchy-filter": hierarchy_filter,
+                    "condition-filter": condition_filter,
+                    "text-filter": "",
+                    "policy-name-filter": policy_name_filter,
+                    "filtered-policy-statements": filtered_statements
+    }
 
-        # # Writing to sample.json
-        # with open(f"policyoutput-{tenancy_ocid}.json", "w") as outfile:
-        #     outfile.write(json_object)
-    logger.info(f"-----Complete--------")
+        json_object = json.dumps(filtered_statements, indent=2)
+        with open(f"policyoutput-{policy_analysis.tenancy_ocid}.json", "w") as outfile:
+            outfile.write(json_object)
+
+    logger.info(f"-----Complete ({len(filtered_statements)})--------")

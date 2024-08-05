@@ -1,6 +1,7 @@
 import logging
 from threading import Lock
 
+
 class Progress():
 
     def __init__(self, progress_val: int):
@@ -30,7 +31,7 @@ class Progress():
             # Figure completion
             comp_step = int(self.loaded / self.to_load * 100)
             self.logger.debug(f"Completed {self.loaded} of {self.to_load} for a step of {comp_step}")
-            if (comp_step%20 == 0 and self.loaded%10 == 0):
+            if (comp_step % 20 == 0 and self.loaded % 10 == 0):
                 self.logger.info(f"Completed {self.loaded} of {self.to_load} for a step of {comp_step}")
 
             # Report progress via progress bar (int version)
