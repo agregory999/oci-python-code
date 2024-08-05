@@ -22,10 +22,22 @@ import argparse   # Argument Parsing
 import logging    # Python Logging
 import datetime
 from datetime import timezone
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
+
+# Callback
+def thread_completion_callback(future: Future):
+    try:
+        res = future.result()
+        if res:
+            logger.info(f"Result: {res}")
+        else:
+            pass
+            # print(".",end="",flush=True)
+    except Exception as e:
+        logger.error(f"Failed: {e}")
 
 # Threaded function
-def work_function(ocid: str):
+def work_function(ocid: str) -> str:
     # VCN Example
     try:
 
@@ -42,7 +54,7 @@ def work_function(ocid: str):
             compartment_id=vcn.compartment_id,
             vcn_id=vcn.id
         ).data
-        #logger.info(f"Subnets: {subnet_list}")
+        logger.debug(f"Subnets in {vcn.display_name}: {subnet_list}")
 
         #can_delete=True
         for i,sn in enumerate(subnet_list):
@@ -57,12 +69,14 @@ def work_function(ocid: str):
 
         #logger.info(f"{vcn.display_name}:{vcn.time_created}{vcn.id}")                 
         if vcn.time_created < datetime.datetime(year=2023, month=12, day=31,tzinfo=timezone.utc):
-            logger.info(f"{vcn.display_name}:{vcn.id}:{vcn.time_created} -- Empty subnets and older than 2023")
+            logger.debug(f"{vcn.display_name}:{vcn.id}:{vcn.time_created} -- Empty subnets and older than 2023")
         else:
-            logger.info(f"{vcn.display_name}:{vcn.id} -- Empty subnets and newer than 2023")
+            logger.debug(f"{vcn.display_name}:{vcn.id} -- Empty subnets and newer than 2023")
+        return f"VCN {vcn.display_name}/{vcn.id} is able to be deleted"
     except ServiceError as ex:
         logger.error(f"Failed to call OCI.  Target Service/Operation: {ex.target_service}/{ex.operation_name} Code: {ex.code}")
         logger.debug(f"Full Exception Detail: {ex}")
+        raise ex
 
 
 # Only if called in Main
@@ -139,11 +153,16 @@ if __name__ == "__main__":
 
     # Thread Pool with execution based on incoming list of OCIDs
     with ThreadPoolExecutor(max_workers = threads, thread_name_prefix="thread") as executor:
-        results = executor.map(work_function, vcn_ocids)
+
+        results = [executor.submit(work_function, ocid) for ocid in vcn_ocids]
         logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
 
-    for res in results:
-        if res:
-            logger.info(f"Result: {res}")
-        else:
-            logger.debug(f"Result: {res}")
+        # Add callbacks to report
+        for future in results:
+            future.add_done_callback(thread_completion_callback)
+
+    # for res in results:
+    #     if res:
+    #         logger.info(f"Result: {res}")
+    #     else:
+    #         logger.debug(f"Result: {res}")
