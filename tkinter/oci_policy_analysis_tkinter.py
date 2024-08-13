@@ -25,6 +25,8 @@ from dynamic import DynamicGroupAnalysis
 from policy import PolicyAnalysis
 from progress import Progress
 
+from oci.identity_domains import IdentityDomainsClient
+
 ###############################################################################################################
 # Global variables and Helper
 ###############################################################################################################
@@ -59,7 +61,7 @@ def enable_buttons():
     btn_clear.config(state=tk.ACTIVE)
     btn_load.config(state=tk.ACTIVE)
     btn_save.config(state=tk.ACTIVE)
-    btn_cons.config(state=tk.ACTIVE)
+    # btn_cons.config(state=tk.ACTIVE)
     # input_my_user.config(state=tk.ACTIVE)
     # input_my_compartment.config(state=tk.ACTIVE)
 
@@ -93,6 +95,55 @@ def load_policy_analysis_from_client():
     update_output_dg()
     enable_buttons()
 
+
+# Gray or un-gray location tenancy box
+def select_location_tenancy():
+    """Based on check box for tenancy location, change the checkbox and gray out"""
+    
+    if location_filter_tenancy.get():
+        # only filter for tenancy
+        logger.debug("tenancy clicked")
+        entry_loc.delete(0, tk.END)
+        entry_loc.insert(0,"tenancy")
+        entry_loc.config(state=tk.DISABLED)
+    else:
+        entry_loc.config(state=tk.NORMAL)
+        entry_loc.delete(0, tk.END)
+        entry_loc.insert(0,"")
+    update_output()
+
+# Gray or un-gray subject box
+def select_subject_any():
+    """Based on check box for tenancy location, change the checkbox and gray out"""
+    
+    if use_subject_any.get():
+        # only filter for tenancy
+        logger.debug("any-user clicked")
+        entry_subj.delete(0, tk.END)
+        entry_subj.insert(0,"any-user|any-group")
+        entry_subj.config(state=tk.DISABLED)
+    else:
+        entry_subj.config(state=tk.NORMAL)
+        entry_subj.delete(0, tk.END)
+        entry_subj.insert(0,"")
+    update_output()
+
+# Gray or un-gray subject box
+def select_hierarchy_root():
+    """Based on check box for tenancy location, change the checkbox and gray out"""
+    
+    if hierarchy_filter_root.get():
+        # only filter for tenancy
+        logger.debug("ROOT clicked")
+        entry_policy_loc.delete(0, tk.END)
+        entry_policy_loc.insert(0,"ROOT")
+        entry_policy_loc.config(state=tk.DISABLED)
+    else:
+        entry_policy_loc.config(state=tk.NORMAL)
+        entry_policy_loc.delete(0, tk.END)
+        entry_policy_loc.insert(0,"")
+    update_output()
+
 # Process the toggle of Using Instance Principal
 def select_instance_principal():
     '''Update variable in class'''
@@ -110,6 +161,11 @@ def clear_filters():
     '''Clears the Policy filters and updates the UI'''
 
     logger.info(f"Clearing Filters")
+    # Clear any disabled fields
+    entry_subj.config(state=tk.NORMAL)
+    entry_loc.config(state=tk.NORMAL)
+    entry_policy_loc.config(state=tk.NORMAL)
+    # Remove values
     entry_subj.delete(0, tk.END)
     entry_verb.delete(0, tk.END)
     entry_res.delete(0, tk.END)
@@ -118,6 +174,11 @@ def clear_filters():
     entry_policy_loc.delete(0, tk.END)
     entry_policy.delete(0, tk.END)
     entry_text.delete(0, tk.END)
+    # Reset Checkboxes
+    use_subject_any.set(False)
+    location_filter_tenancy.set(False)
+    hierarchy_filter_root.set(False)
+
     # show_only_my_compartment.set(False)
     # show_only_my_user.set(False)
 
@@ -163,16 +224,16 @@ def update_output():
         if chk_show_special.get() and (statement[6] == "define" or statement[4].startswith("endorse")  or statement[4].startswith("admin")):
             rows_to_show.append(index)
         # Service
-        if chk_show_service.get() and statement[6] == "service":
+        elif chk_show_service.get() and statement[6] == "service":
             rows_to_show.append(index)
         # Dynamic
-        if chk_show_dynamic.get() and statement[6] == "dynamic-group":
+        elif chk_show_dynamic.get() and statement[6] == "dynamic-group":
             rows_to_show.append(index)
         # Resource
-        if chk_show_resource.get() and statement[6] == "resource":
+        elif chk_show_resource.get() and statement[6] == "resource":
             rows_to_show.append(index)
         # Regular
-        if chk_show_regular.get() and (statement[6] == "group" or statement[6] == "any-user" or statement[6] == "any-group"):
+        elif chk_show_regular.get() and (statement[6] == "group" or statement[6] == "any-user" or statement[6] == "any-group"):
             rows_to_show.append(index)
 
         # Look for issues and highlight
@@ -242,24 +303,29 @@ def update_load_options():
 #         entry_subj.delete(0,tk.END)
 #         logger.info(f"Loading groups: {policy_analysis.tenancy_ocid} : {policy_analysis.config["user"]}")
 #         # Load my groups
-#         idc = policy_analysis.identity_client
-#         # my_groups = idc.list_user_group_memberships(
+#         idc = policy_analysis.idm_client
+#         me = idc.get_user(
+#             # compartment_id=policy_analysis.tenancy_ocid,
+#             user_id=policy_analysis.config["user"],
+#             attributes="groups"
+#         ).data        
+#         # my_groups = idc.list_groups(
 #         #     compartment_id=policy_analysis.tenancy_ocid,
 #         #     #user_id=policy_analysis.config["user"]
-#         # ).data        
-#         my_groups = idc.list_groups(
-#             compartment_id=policy_analysis.tenancy_ocid,
-#             #user_id=policy_analysis.config["user"]
-#         ).data
-#         for g in my_groups:
-#             logger.info(f"Group: {g.name}")
-#             my_groups = idc.list_user_group_memberships(
-#                 compartment_id=policy_analysis.tenancy_ocid,
-#                 group_id=g.id
-#             ).data 
-#             for ug in my_groups:
-#                 logger.info(f"User Group: {ug.user_id} / {ug.group_id}")
-#         entry_subj.insert(0,"cloud-engineering-users|some-group")
+#         # ).data
+#         logger.info(f"Groups: {me.groups}")
+
+#         all_my_groups = []
+#         for g in me.groups:
+#             logger.info(f"Group: {g.display}")
+#             all_my_groups.append(g.display)
+#         #     # my_groups = idc.list_user_group_memberships(
+#         #     #     compartment_id=policy_analysis.tenancy_ocid,
+#         #     #     group_id=g.id
+#         #     # ).data 
+#         #     for ug in my_groups:
+#         #         logger.info(f"User Group: {ug.user_id} / {ug.group_id}")
+#         entry_subj.insert(0, "|".join(all_my_groups))
 #         update_output()
 
 #     if show_only_my_compartment.get():
@@ -376,8 +442,8 @@ def save_file():
     """Save the current tksheet file as a new file."""
 
     filepath = asksaveasfilename(
-        defaultextension=".csv",
-        filetypes=[("CSV Files", "*.csv"), ("JSON Files", "*.json")],
+        defaultextension=".json",
+        filetypes=[("JSON Files", "*.json"), ("CSV Files", "*.csv")],
     )
     if not filepath:
         return
@@ -434,15 +500,15 @@ def save_file():
                 csv_writer.writerow([st[0], st[1], st[3], f"{st[4]}", st[6], st[7], st[8], st[9], st[10], st[12], st[13], st[14]])
     logger.info(f"Finished writing file: {filepath}")
 
-def add_new_tab():
-    tab_consolidation = ttk.Frame(tab_control)
-    tab_control.add(tab_consolidation, text="Consolidation")
-    current_selection = sheet_policies.get_selected_rows()
-    logger.info(f"Selected data: {current_selection}")
-    if current_selection:
-        for row in current_selection:
-            # selected_row = sheet_policies.displayed_row_to_data(current_selection.row)
-            logger.info(f"Selected data: {sheet_policies.get_data(row)}")
+# def add_new_tab():
+#     tab_consolidation = ttk.Frame(tab_control)
+#     tab_control.add(tab_consolidation, text="Consolidation")
+#     current_selection = sheet_policies.get_selected_rows()
+#     logger.info(f"Selected data: {current_selection}")
+#     if current_selection:
+#         for row in current_selection:
+#             # selected_row = sheet_policies.displayed_row_to_data(current_selection.row)
+#             logger.info(f"Selected data: {sheet_policies.get_data(row)}")
 
 ########################################
 # Main Code
@@ -560,10 +626,20 @@ if __name__ == "__main__":
     label_filter = tk.Label(master=frm_filter, text="Filters - Each filter supports | as OR.  Filters are AND.\nPolicy Syntax: allow <subject> to <verb> <resource> in <location> where <conditions> // Policy Comment")
     label_filter.grid(row=0, column=0, sticky="ew", columnspan=4, padx=5, pady=2)
 
+    # Special Inner Frame for Subject / any
+    frm_subj = ttk.Frame(frm_filter)
+
     label_subj = ttk.Label(master=frm_filter, text="Subject\n(group name)")
     label_subj.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
-    entry_subj = ttk.Entry(master=frm_filter, state=tk.DISABLED, width=40)
-    entry_subj.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+    entry_subj = ttk.Entry(master=frm_subj, state=tk.DISABLED, width=30)
+    entry_subj.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
+
+    use_subject_any = tk.BooleanVar()
+    input_location_filter_tenancy = ttk.Checkbutton(frm_subj, text='Any-User/Any-Group', variable=use_subject_any, command=select_subject_any)
+    input_location_filter_tenancy.grid(row=0, column=1, sticky="ew", padx=1, pady=1)
+
+    # add the subject box to grid
+    frm_subj.grid(row=1, column=1, sticky="ew")
 
     label_verb = ttk.Label(master=frm_filter, text="Verb\n(inspect/read/use/manage)")
     label_verb.grid(row=1, column=2, sticky="ew", padx=5, pady=2)
@@ -577,14 +653,33 @@ if __name__ == "__main__":
 
     label_loc = ttk.Label(master=frm_filter, text="Location\n(within statement)")
     label_loc.grid(row=2, column=2, sticky="ew", padx=5, pady=2)
-    entry_loc = ttk.Entry(master=frm_filter, state=tk.DISABLED, width=40)
-    entry_loc.grid(row=2, column=3, sticky="ew", padx=5, pady=2)
+
+    # Special Inner Frame for location / tenancy
+    frm_location = ttk.Frame(frm_filter)
+
+    entry_loc = ttk.Entry(master=frm_location, state=tk.DISABLED, width=30)
+    entry_loc.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
+
+    location_filter_tenancy = tk.BooleanVar()
+    input_location_filter_tenancy = ttk.Checkbutton(frm_location, text='Tenancy', variable=location_filter_tenancy, command=select_location_tenancy)
+    input_location_filter_tenancy.grid(row=0, column=1, sticky="ew", padx=1, pady=1)
+
+    frm_location.grid(row=2, column=3, sticky="ew")
+
+    # Special Inner Frame for location / tenancy
+    frm_hierarchy = ttk.Frame(frm_filter)
 
     label_policy_loc = ttk.Label(master=frm_filter, text="Compartment\n(policy location)")
     label_policy_loc.grid(row=3, column=0, sticky="ew", padx=5, pady=2)
-    entry_policy_loc = ttk.Entry(master=frm_filter, state=tk.DISABLED, width=40)
-    entry_policy_loc.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
-   
+    entry_policy_loc = ttk.Entry(master=frm_hierarchy, state=tk.DISABLED, width=30)
+    entry_policy_loc.grid(row=0, column=0, sticky="ew", padx=5, pady=2)
+       
+    hierarchy_filter_root = tk.BooleanVar()
+    input_hierarchy_filter = ttk.Checkbutton(frm_hierarchy, text='Root Only', variable=hierarchy_filter_root, command=select_hierarchy_root)
+    input_hierarchy_filter.grid(row=0, column=1, sticky="ew", padx=1, pady=1)
+
+    frm_hierarchy.grid(row=3, column=1, sticky="ew")
+
     label_condition = ttk.Label(master=frm_filter, text="Conditions\n(where clause)")
     label_condition.grid(row=3, column=2, sticky="ew", padx=5, pady=2)
     entry_condition = ttk.Entry(master=frm_filter, state=tk.DISABLED, width=40)
@@ -610,14 +705,14 @@ if __name__ == "__main__":
     btn_save.grid(row=4, column=4, sticky="ew", padx=5, pady=2)
 
     separator = ttk.Separator(frm_policy_top, orient=tk.HORIZONTAL)
-    # separator.grid(row=5, column=0, columnspan=4)
-    # Show my permissions - essentially a filter on my groups or location
+    separator.grid(row=5, column=0, columnspan=4)
+    # # Show my permissions - essentially a filter on my groups or location
     # show_only_my_user = tk.BooleanVar()
     # show_only_my_compartment = tk.BooleanVar()
     # input_my_user = ttk.Checkbutton(frm_filter, text='Show My Policies', variable=show_only_my_user, state=tk.DISABLED, command=update_show_my_details)
-    # input_my_user.grid(row=3, column=0, columnspan=2, sticky="ew", padx=25, pady=3)
+    # input_my_user.grid(row=6, column=1, sticky="ew", padx=25, pady=3)
     # input_my_compartment = ttk.Checkbutton(frm_filter, text='Show My Compartment', variable=show_only_my_compartment, state=tk.DISABLED, command=update_show_my_details)
-    # input_my_compartment.grid(row=3, column=2, columnspan=2, sticky="ew", padx=25, pady=3)
+    # input_my_compartment.grid(row=6, column=2,  sticky="ew", padx=25, pady=3)
 
 
     # Output Show
@@ -642,8 +737,8 @@ if __name__ == "__main__":
     show_regular.grid(row=0, column=6, sticky="ew", padx=15, pady=3)
     show_expanded.grid(row=0, column=7, sticky="ew", padx=15, pady=3)
   
-    btn_cons = ttk.Button(master=frm_output, text="Consolidate", state=tk.DISABLED, command=add_new_tab)
-    btn_cons.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
+    # btn_cons = ttk.Button(master=frm_output, text="Consolidate", state=tk.DISABLED, command=add_new_tab)
+    # btn_cons.grid(row=1, column=0, sticky="ew", padx=5, pady=2)
 
 
     # Define dg button but don't place it
@@ -678,7 +773,6 @@ if __name__ == "__main__":
     btn_dyn_group_inuse_analysis = ttk.Button(master=frm_dyn_group_actions, text="Run In Use Analysis", command=run_dynamic_group_inuse_analysis)
     btn_dyn_group_ocid_analysis = ttk.Button(master=frm_dyn_group_actions, text="Run OCID Analysis", command=run_dynamic_group_ocid_analysis)
 
-    # text_dg = tk.Text(master=frm_dyn_group_output)
     btn_dyn_group_inuse_analysis.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
     btn_dyn_group_ocid_analysis.grid(row=0, column=2, columnspan=2, sticky="ew", padx=5, pady=3)
 

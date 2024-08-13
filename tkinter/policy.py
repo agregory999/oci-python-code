@@ -12,6 +12,7 @@ from oci.exceptions import ConfigFileNotFound, ServiceError
 from oci.identity import IdentityClient
 from oci.identity.models import Compartment, Policy, UpdatePolicyDetails
 from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
+from oci.identity_domains import IdentityDomainsClient
 
 # Local
 from progress import Progress
@@ -67,6 +68,7 @@ class PolicyAnalysis:
 
                 # Create the OCI Client to use
                 self.identity_client = IdentityClient(config={}, signer=signer, retry_strategy=DEFAULT_RETRY_STRATEGY)
+                self.idm_client = IdentityDomainsClient(config={}, signer=signer, retry_strategy=DEFAULT_RETRY_STRATEGY)
                 self.tenancy_ocid = signer.tenancy_id
             except Exception as exc:
                 self.logger.fatal(f"Unable to use IP Authentication: {exc}")
@@ -79,6 +81,10 @@ class PolicyAnalysis:
 
                 # Create the OCI Client to use
                 self.identity_client = IdentityClient(self.config, retry_strategy=DEFAULT_RETRY_STRATEGY)
+                self.idm_client = IdentityDomainsClient(config=self.config,
+                                                        service_endpoint="https://idcs-aea17de1f62a467cbc60239f8851911c.identity.oraclecloud.com",
+                                                        retry_strategy=DEFAULT_RETRY_STRATEGY)
+
                 self.tenancy_ocid = self.config["tenancy"]
             except ConfigFileNotFound as exc:
                 self.logger.fatal(f"Unable to use Profile Authentication: {exc}")
@@ -130,10 +136,14 @@ class PolicyAnalysis:
                                 result.group('optional') if result.group('optional') else "",
                                 time_created
                 ]
-                if result.group('perm'):
-                    self.logger.debug(f"Statement Res: {result.group('resource')} List res: {statement_list[9]}")
-                
-                # Statement tuple return
+                # Post-process any-user / any-group
+                if statement_list[6] == "any-user" or statement_list[6] == "any-group":
+                    statement_list[7] = statement_list[6]
+                # Hierarchy ROOT so searchable
+                if not statement_list[3] or statement_list[3] == "":
+                    statement_list[3] = "ROOT"
+
+                # Statement list return
                 return statement_list
             except Exception as e:
                 self.logger.warning(f"Failed to parse result: {e}")
@@ -375,7 +385,11 @@ class PolicyAnalysis:
 
         self.logger.debug(f"Filtering Location(B): {len(regular_statements_filtered_prev)} DG/SVC/Reg statements")
         for filt in split_loc_filter:
-            regular_statements_filtered.extend(list(filter(lambda statement: filt.casefold() in statement[12].casefold(), regular_statements_filtered_prev)))
+            if "tenancy" == filt:
+                self.logger.info("tenancy filter")
+                regular_statements_filtered.extend(list(filter(lambda statement: filt.casefold() in statement[11].casefold(), regular_statements_filtered_prev)))
+            else:    
+                regular_statements_filtered.extend(list(filter(lambda statement: filt.casefold() in statement[12].casefold(), regular_statements_filtered_prev)))
         self.logger.debug(f"Filtering Location(A): {len(regular_statements_filtered)} Reg statements")
 
         # Reset filter
