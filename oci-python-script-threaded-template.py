@@ -20,7 +20,18 @@ from oci.resource_search.models import StructuredSearchDetails
 # Additional imports
 import argparse   # Argument Parsing
 import logging    # Python Logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
+
+global total
+total = 0
+
+# Callback
+def finish(future: Future):
+    logger.debug(f"Future: {future.result()}")
+    
+    global total
+    total += future.result()
+    pass
 
 # Threaded function
 def work_function(ocid: str):
@@ -98,6 +109,8 @@ if __name__ == "__main__":
 
     # PHASE 3 - Main Script Execution (threaded)
 
+    # 2 examples for getting a list for threading
+    # 1) Resource Search, create list of OCIDs
     # Get Resource List via Search
     atp_db = search_client.search_resources(
         search_details=StructuredSearchDetails(
@@ -112,8 +125,32 @@ if __name__ == "__main__":
     for i,db_it in enumerate(atp_db.items, start=1):
         db_ocids.append(db_it.identifier)
 
+    # 2) Use pagination and list_call_get_all_results, then pass actual objects as work items
+    # Get all compartments (we don't know the depth of any), tenancy level
+    # Using the paging API
+    # paginated_response = pagination.list_call_get_all_results(
+    #     identity_client.list_compartments,
+    #     tenancy_ocid,
+    #     access_level="ACCESSIBLE",
+    #     sort_order="ASC",
+    #     compartment_id_in_subtree=True,
+    #     lifecycle_state="ACTIVE",
+    #     limit=1000)
+    # comp_list.extend(paginated_response.data)
+
     # Thread Pool with execution based on incoming list of OCIDs
     with ThreadPoolExecutor(max_workers = threads, thread_name_prefix="thread") as executor:
-        results = executor.map(work_function, db_ocids)
+        results = [executor.submit(work_function, ocid) for ocid in db_ocids]
         logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
 
+    # Thread Pool with execution based on incoming list of Compartments
+    # with ThreadPoolExecutor(max_workers = threads, thread_name_prefix="thread") as executor:
+    #     results = [executor.submit(work_function, c) for c in comp_list]
+    #     logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
+
+        # Add callbacks to report
+        for future in results:
+            # future.add_done_callback(print)
+            future.add_done_callback(finish)
+
+    logger.info(f"Finished - {total} results")

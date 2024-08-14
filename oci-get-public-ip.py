@@ -140,9 +140,9 @@ if __name__ == "__main__":
         logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
 
 
-        # # Add callbacks to report
+        # Add callbacks to report
         for future in results:
             # future.add_done_callback(print)
             future.add_done_callback(finish)
 
-    logger.info(f"Finsihed - {total} results")
+    logger.info(f"Finished - {total} results")
