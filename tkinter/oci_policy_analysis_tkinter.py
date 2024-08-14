@@ -387,13 +387,6 @@ def run_dynamic_group_ocid_analysis():
     update_output_dg()
     logger.info(f"Ran DG OCID Analysis from UI")
 
-def run_policy_dynamic_group_analysis():
-    """Check each DG-based policy statement to see if the DG exists, and if it is valid"""
-    logger.info(f"Calling Policy DG Analysis")
-    policy_analysis.check_for_invalid_dynamic_groups(dynamic_groups=dyn_group_analysis.dynamic_groups)
-    update_output()
-    logger.info(f"Called Policy DG Analysis")
-
 # Check progress meter for updates
 def update_progress():
     logger.debug(f"Called check progress.  Value: {progress.progressbar_val} UI: {progressbar_val.get()}")
@@ -554,7 +547,10 @@ if __name__ == "__main__":
 
     window = tk.Tk()
     window.title("Policy and Dynamic Group Analysis")
-    
+    f = font.nametofont("TkDefaultFont")
+    f.configure(family="Oracle Sans",
+                size=12,
+                weight=font.NORMAL)
     # Main Window has 2 rows, top and bottom
     # Top is inputs to load policies
     # Bottom is tabbed display
@@ -566,11 +562,11 @@ if __name__ == "__main__":
     tab_control = ttk.Notebook(window)
     tab_policy = ttk.Frame(tab_control)
     tab_dg = ttk.Frame(tab_control)
-    tab_work_items = ttk.Frame(tab_control)
+    # tab_work_items = ttk.Frame(tab_control)
 
     tab_control.add(tab_policy, text=POLICY_TAB_NAME)
     tab_control.add(tab_dg, text=DG_TAB_NAME)
-    tab_control.add(tab_work_items, text=WORK_TAB_NAME)
+    # tab_control.add(tab_work_items, text=WORK_TAB_NAME)
     logger.debug(f"Tab: {tab_control}")
     # Frames
     frm_init = ttk.Frame(window, borderwidth=2)
@@ -780,8 +776,8 @@ if __name__ == "__main__":
                            theme="light green",
                         #    data=[[f"Row {r}, Column {c}" for c in range(10)] for r in range(100)],
                            font=("PT Mono", 11, "normal"),
-                           header_font=("Courier New", 11, "bold"),
-                           index_font=("Courier New", 11, "bold"),
+                           header_font=("Oracle Sans", 12, "bold"),
+                           index_font=("Oracle Sans", 12, "bold"),
                         #    displayed_columns=([0,3,4], False),
                            headers=("Policy Name","Policy OCID","Compartment OCID","Hierarchy","Statement Text", "Valid",
                                     "Subject Type","Subject","Verb","Resource","Permission","Location Type","Location",
@@ -798,7 +794,6 @@ if __name__ == "__main__":
                                    "shift_cell_select", # Shift Cell
                                    "row_select" # Select rows
     )
-    sheet_policies.popup_menu_add_command("Analyze Dynamic Group Statements", run_policy_dynamic_group_analysis)    # Insert to main window
     sheet_policies.popup_menu_add_command("Analyze Dynamic Group", analyze_dynamic_group)    # Insert to main window
     sheet_policies.popup_menu_add_command("Save csv", save_file)    # Insert to main window
     sheet_policies.pack(expand=True, fill=tk.BOTH, side= tk.TOP)
@@ -807,8 +802,8 @@ if __name__ == "__main__":
                            theme="light blue",
                         #    data=[[f"Row {r}, Column {c}" for c in range(10)] for r in range(100)],
                            font=("PT Mono", 11, "normal"),
-                           header_font=("Courier New", 11, "bold"),
-                           index_font=("Courier New", 11, "bold"),
+                           header_font=("Oracle Sans", 12, "bold"),
+                           index_font=("Oracle Sans", 12, "bold"),
                         #    displayed_columns=([0,3,4], False),
                            headers=("Dynamic Group Name","Dynamic Group OCID","Matching Statement","Rule Component","DG In Use", "Invalid OCIDs", "Creation Time")
     )
@@ -836,9 +831,9 @@ if __name__ == "__main__":
     frm_dyn_group_actions.pack(expand=False, fill=tk.BOTH)
     frm_dyn_group_output.pack(expand=True, fill=tk.BOTH)
  
-    # Work Items Tab
-    text_work = ttk.Text(master=tab_work_items, font="TkFixedFont")
-    text_work.pack(expand=True, fill=tk.BOTH)
+    # # Work Items Tab
+    # text_work = ttk.Text(master=tab_work_items, font="TkFixedFont")
+    # text_work.pack(expand=True, fill=tk.BOTH)
 
     # Add tabs
     tab_control.pack(expand=True, fill=tk.BOTH)

@@ -283,7 +283,7 @@ class PolicyAnalysis:
                 # We know the compartment count now - set up progress, if warranted
                 if self.progress:
                     self.progress.set_to_load(len(comp_list))
-                    self.logger.info(f"Progress Bar set total: {len(comp_list)}")
+                    self.logger.debug(f"Progress Bar set total: {len(comp_list)}")
 
                 # Use multiple threads at once
                 with ThreadPoolExecutor(max_workers = THREADS, thread_name_prefix="thread") as executor:

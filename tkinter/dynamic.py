@@ -198,7 +198,7 @@ class DynamicGroupAnalysis:
         for i, dg in enumerate(self.dynamic_groups):
             self.logger.debug(f"Validate DG {dg[0]}")
             valid_dg = self.dg_in_use(dg=dg)
-            self.logger.info(f"Valid: {dg[0]}: {valid_dg}")
+            self.logger.debug(f"Valid: {dg[0]}: {valid_dg}")
 
             # Set in existing DG
             dg[4] = valid_dg
@@ -359,7 +359,7 @@ class DynamicGroupAnalysis:
         for filt in split_name_filter:
             filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[0].casefold(), self.dynamic_groups)))
         # filtered_dynamic_groups = self.dynamic_groups
-        self.logger.info(f"Filtering Name: {split_name_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
+        self.logger.debug(f"Filtering Name: {split_name_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
 
         filtered_dynamic_groups_prev = filtered_dynamic_groups
         filtered_dynamic_groups = []
@@ -368,7 +368,7 @@ class DynamicGroupAnalysis:
         for filt in split_ocid_filter:
             filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))
         # filtered_dynamic_groups = self.dynamic_groups
-        self.logger.info(f"Filtering OCID: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
+        self.logger.debug(f"Filtering OCID: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
 
         filtered_dynamic_groups_prev = filtered_dynamic_groups
         filtered_dynamic_groups = []
@@ -377,5 +377,6 @@ class DynamicGroupAnalysis:
         for filt in split_type_filter:
             filtered_dynamic_groups.extend(list(filter(lambda dg: filt.casefold() in dg[2].casefold(), filtered_dynamic_groups_prev)))
         # filtered_dynamic_groups = self.dynamic_groups
-        self.logger.info(f"Filtering Type: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
+        self.logger.debug(f"Filtering Type: {split_ocid_filter}. After: {len(filtered_dynamic_groups)} Dynamic Groups")
+        self.logger.info(f"After filters: {len(filtered_dynamic_groups)} Dynamic Groups")
         return filtered_dynamic_groups
