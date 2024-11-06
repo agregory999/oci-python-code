@@ -27,6 +27,7 @@ from oci.exceptions import ConfigFileNotFound
 
 import oci
 
+
 # Constants
 DEFAULT_SCHEDULE = "0,0,0,0,0,0,0,*,*,*,*,*,*,*,*,*,*,0,0,0,0,0,0,0"
 
@@ -114,6 +115,11 @@ def database_work(db_id: str):
             did_work["No-op"] = {"Free": f"{db.is_free_tier}"}
             return did_work
 
+        if db.is_dev_tier:
+            logger.debug("Don't operate on Developer ATP")
+            did_work["No-op"] = {"Dev": f"{db.is_dev_tier}"}
+            return did_work  
+        
         if db.lifecycle_state == "UNAVAILABLE":
             logger.debug("Don't operate on UNAVAILABLE DBs")
             did_work["No-op"] = {"Lifecycle": f"{db.lifecycle_state}"}

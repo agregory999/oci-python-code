@@ -91,10 +91,10 @@ def database_work(db_id: str):
     # Now try it
     try:
         # Show before
-        logger.debug(f"----{db_id}----Examine ({db.display_name})----------")
-        logger.debug(f'CPU Model: {db.compute_model} Dedicated: {db.is_dedicated} DG Role: {db.role}')
-        logger.debug(f"Storage Name: {db.display_name} DB TB: {db.data_storage_size_in_tbs}")
-        logger.debug(f"License Model: {db.license_model} Edition: {db.database_edition} ")
+        logger.info(f"----{db_id}----Examine ({db.display_name})----------")
+        logger.info(f'CPU Model: {db.compute_model} Dedicated: {db.is_dedicated} DG Role: {db.role}')
+        logger.info(f"Storage Name: {db.display_name} DB TB: {db.data_storage_size_in_tbs}")
+        logger.info(f"License Model: {db.license_model} Edition: {db.database_edition} ")
         logger.info(f"----{db_id}----Start ({db.display_name})----------")
 
         if db.is_dedicated:
@@ -114,7 +114,7 @@ def database_work(db_id: str):
         
         if db.is_dev_tier:
             logger.debug("Don't operate on Developer ATP")
-            did_work["No-op"] = {"Free": f"{db.is_free_tier}"}
+            did_work["No-op"] = {"Dev": f"{db.is_dev_tier}"}
             return did_work        
 
         if db.lifecycle_state == "UNAVAILABLE":
