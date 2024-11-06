@@ -111,6 +111,11 @@ def database_work(db_id: str):
             logger.debug("Don't operate on free ATP")
             did_work["No-op"] = {"Free": f"{db.is_free_tier}"}
             return did_work
+        
+        if db.is_dev_tier:
+            logger.debug("Don't operate on Developer ATP")
+            did_work["No-op"] = {"Free": f"{db.is_free_tier}"}
+            return did_work        
 
         if db.lifecycle_state == "UNAVAILABLE":
             logger.debug("Don't operate on UNAVAILABLE DBs")
@@ -252,7 +257,7 @@ def database_work(db_id: str):
             logger.info(f'>>>{"DRYRUN: " if dryrun else ""}Updating Tags DB: {db.display_name} to Schedule / AnyDay Default')
 
             # Start and wait if needed
-            wait_for_available(ddb_id=db.id, start=True)
+            wait_for_available(db_id=db.id, start=True)
 
             if not dryrun:
                 database_client.update_autonomous_database(
@@ -305,8 +310,6 @@ if __name__ == "__main__":
     if verbose:
         logger.setLevel(logging.DEBUG)
 
-    logger.info(f'Using profile {profile} with Logging level {"DEBUG" if verbose else "INFO"}')
-
     # Client creation
     if use_instance_principals:
         logger.info(f"Using Instance Principal Authentication")
@@ -331,7 +334,7 @@ if __name__ == "__main__":
             logger.fatal(f"Unable to use Profile Authentication: {exc}")
             exit(1)
 
-    # Main routine:q
+    # Main routine
         
     # Grab all ATP Serverless
     # Loop through
@@ -346,7 +349,7 @@ if __name__ == "__main__":
     atp_db = search_client.search_resources(
         search_details=StructuredSearchDetails(
             type = "Structured",
-            query='query autonomousdatabase resources return allAdditionalFields where (workloadType="ATP")'
+            query='query autonomousdatabase resources return allAdditionalFields where (workloadType="ATP") || (workloadType="JSON")'
         ),
         limit=1000
     ).data
