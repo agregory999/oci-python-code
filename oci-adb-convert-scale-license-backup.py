@@ -338,9 +338,9 @@ if __name__ == "__main__":
         datestring = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
         filename = f'oci-atp-scale-down-{datestring}.json'
         with open(filename,"w") as outfile:
-
-            for result in results:
-                outfile.write(json.dumps(result, indent=2))
+            outfile.write(json.dumps(results, indent=2))
+            # for result in results:
+            #     outfile.write(json.dumps(result, indent=2))
 
         logging.info(f"Script complete - wrote JSON to {filename}.")
     else:
