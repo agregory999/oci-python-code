@@ -21,6 +21,7 @@ from oci.resource_search.models import StructuredSearchDetails
 import argparse   # Argument Parsing
 import logging    # Python Logging
 from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent import futures
 
 global total
 total = 0
@@ -34,19 +35,20 @@ def finish(future: Future):
     pass
 
 # Threaded function
-def work_function(ocid: str):
-    # ADB Example
-    try:
-        database = database_client.get_autonomous_database(
-            autonomous_database_id=ocid
-        ).data
+def work_function_(ocid: str):
+    # ADB Example - allow exceptions 
+    # try:
+    database = database_client.get_autonomous_database(
+        autonomous_database_id=f"{ocid}"
+    ).data
 
-        logger.info(f"DB Name: {database.display_name}")
-        logger.debug(f"Full Details: {database}")
-    except ServiceError as ex:
-        logger.error(f"Failed to call OCI.  Target Service/Operation: {ex.target_service}/{ex.operation_name} Code: {ex.code}")
-        logger.debug(f"Full Exception Detail: {ex}")
-
+    logger.info(f"DB Name: {database.display_name}")
+    logger.info(f"DB OCID: {ocid}")
+        # logger.debug(f"Full Details: {database}")
+    # except ServiceError as ex:
+    #     logger.error(f"Failed to call OCI.  Target Service/Operation: {ex.target_service}/{ex.operation_name} Code: {ex.code}")
+    #     logger.debug(f"Full Exception Detail: {ex}")
+    return database.display_name
 
 # Only if called in Main
 if __name__ == "__main__":
@@ -56,7 +58,7 @@ if __name__ == "__main__":
     parser.add_argument("-v", "--verbose", help="Increased Verbosity, boolean", action="store_true")
     parser.add_argument("-pr", "--profile", help="Named Config Profile, from OCI Config", default="DEFAULT")
     parser.add_argument("-ip", "--instanceprincipal", help="Use Instance Principal Auth - negates --profile", action="store_true")
-    parser.add_argument("-ipr", "--region", help="Use Instance Principal with alt region")
+    parser.add_argument("-r", "--region", help="Use Instance Principal with alt region")
     parser.add_argument("-t", "--threads", help="Concurrent Threads (def=5)", type=int, default=5)
 
     args = parser.parse_args()
@@ -96,6 +98,9 @@ if __name__ == "__main__":
             # Use a profile (must be defined)
             logger.info(f"Using Profile Authentication: {profile}")
             config = config.from_file(profile_name=profile)
+            if region:
+                config["region"] = region
+                logger.info(f"Changing region to {region}")
 
             # Create the OCI Client to use
             database_client = DatabaseClient(config, retry_strategy=retry.DEFAULT_RETRY_STRATEGY)
@@ -148,9 +153,15 @@ if __name__ == "__main__":
     #     results = [executor.submit(work_function, c) for c in comp_list]
     #     logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
 
-        # Add callbacks to report
-        for future in results:
-            # future.add_done_callback(print)
-            future.add_done_callback(finish)
+        # # Add callbacks to report
+        # for future in results:
+        #     # future.add_done_callback(print)
+        #     future.add_done_callback(finish)
+    
 
-    logger.info(f"Finished - {total} results")
+        for future in futures.as_completed(results):
+            try:
+                logger.info(f"Result: {future.result()}")
+            except ServiceError as ex:
+                logger.error(f"ERROR: {ex.message}")
+    logger.info(f"Finished submitting all for parallel execution")
