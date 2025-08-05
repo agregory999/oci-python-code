@@ -1,3 +1,30 @@
+"""
+Sample code for listing and restoring archived objects in an OCI bucket.
+This is not an official Oracle product and is provided as-is without any warranty.
+Use at your own risk and ensure proper testing before use in production environments.
+This sample uses OCI Official SDK for Python with additional Python libraries.
+
+Author: Andrew Gregory, Oracle 
+
+Installation: 
+Python 3.9+
+pip install oci
+
+Usage:
+python oci-oss-restore-all-threaded.py --bucket-name <bucket_name> --compartment-id <compartment_id> [--profile <profile_name>] 
+[--restore-hours <hours>] [--max-workers <num_threads>] [--dry-run | --no-dry-run]
+
+Example (Dry run):
+python oci-oss-restore-all-threaded.py --bucket-name my_bucket --compartment-id ocid1.compartment.oc1..aaaaaaaaxxxxx --dry-run
+
+Example (Execute restore):
+python oci-oss-restore-all-threaded.py --bucket-name my_bucket --compartment-id ocid1.compartment.oc1..aaaaaaaaxxxxx --no-dry-run --restore-hours 48 --max-workers 8
+
+Threading and Progress Tracking:
+- Uses ThreadPoolExecutor for concurrent restore operations.  8 is the practical max for most environments.
+- Progress is logged every 1000 objects during listing and after each restore operation completes.
+"""
+
 import oci
 import argparse
 import concurrent.futures
