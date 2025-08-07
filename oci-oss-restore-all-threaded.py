@@ -26,6 +26,7 @@ def parse_arguments():
     parser.add_argument('--bucket-name', required=True, help='Name of the OCI bucket')
     parser.add_argument('--compartment-id', required=True, help='OCID of the compartment')
     parser.add_argument('--profile', default='DEFAULT', help='OCI config profile name')
+    parser.add_argument('--prefix', help='Prefix to filter objects (optional)')
     parser.add_argument('--restore-hours', type=int, default=24, help='Restore duration in hours (default: 24)')
     parser.add_argument('--max-workers', type=int, default=10, help='Max number of concurrent restore threads (default: 10)')
     parser.add_argument('--dry-run', action='store_true', default=True, help='Print restore operations without executing (default: True)')
@@ -77,7 +78,7 @@ def update_progress(future: Future, total: int, counter: List[int], lock: thread
         logger.info(f"Restore progress: {counter[0]}/{total} operations completed")
 
 def process_objects(client: oci.object_storage.ObjectStorageClient, namespace: str, 
-                   bucket_name: str, compartment_id: str, restore_hours: int, 
+                   bucket_name: str, compartment_id: str, prefix: str, restore_hours: int, 
                    max_workers: int, dry_run: bool) -> None:
     """Stream objects using pagination and restore archived ones with progress tracking."""
     total_objects = 0
@@ -93,6 +94,7 @@ def process_objects(client: oci.object_storage.ObjectStorageClient, namespace: s
             'record',  # Yield individual records
             namespace_name=namespace,
             bucket_name=bucket_name,
+            prefix=prefix if prefix else None,
             fields="name,storageTier,archivalState"
         )
         
@@ -156,6 +158,7 @@ def main():
             namespace,
             args.bucket_name,
             args.compartment_id,
+            args.prefix,
             args.restore_hours,
             args.max_workers,
             args.dry_run
