@@ -13,7 +13,7 @@ from oci.auth.signers import InstancePrincipalsSecurityTokenSigner
 from oci import retry
 
 # OCI Clients and models (import as necessary)
-from oci.database import DatabaseClient
+from oci.database import DatabaseClient, DatabaseClientCompositeOperations
 from oci.resource_search import ResourceSearchClient
 from oci.resource_search.models import StructuredSearchDetails
 
@@ -23,6 +23,7 @@ import logging    # Python Logging
 from concurrent.futures import ThreadPoolExecutor, Future
 from concurrent import futures
 import circuitbreaker
+import time
 
 global total
 total = 0
@@ -36,31 +37,58 @@ def finish(future: Future):
     pass
 
 # Threaded function
-def work_function_dbsystem(ocid: str):
+def work_function_dbm(ocid: str):
     # ADB Example - allow exceptions 
     # try:
-    database = database_client.get_db_system(
-        db_system_id=f"{ocid}"
+    database = database_client.get_database(
+        database_id=f"{ocid}"
     ).data
-
-    logger.info(f"DB System Name: {database.display_name}. Lifecycle: {database.lifecycle_state}")
-    
-    if database.lifecycle_state != database.LIFECYCLE_STATE_AVAILABLE:
-        logger.info(f"Not deleting {ocid} due to lifecycle other than {database.LIFECYCLE_STATE_AVAILABLE}")
-        return f"No action for {database.display_name} OCID {ocid}"
 
     # Delete it
     try:
-        logger.info(f"Terminating: {database.display_name} / {ocid}")
-        database_client.terminate_db_system(
-            db_system_id=ocid
-        )
-        logger.info(f"Terminated: {database.display_name} / {ocid}")
+
+        dbm_status = "NONE"
+        if database.database_management_config:
+            dbm_status = database.database_management_config.management_status
+        logger.info(f"DB Name: {database.db_name}. DBM: {dbm_status}")
+        if dbm_status == "ENABLED":
+            start_time = time.perf_counter()
+            # Check PDBs
+            pdbsum = database_client.list_pluggable_databases(
+                database_id=database.id
+            ).data
+            for i in pdbsum:
+                pdb = database_client.get_pluggable_database(
+                    pluggable_database_id=i.id
+                ).data
+                pdbm_status = "NONE"
+                if pdb.pluggable_database_management_config:
+                    pdbm_status = pdb.pluggable_database_management_config.management_status
+ 
+                logger.info(f"-PDB Name: {pdb.pdb_name}. P-DBM: {pdbm_status}")
+                if pdbm_status == "ENABLED":
+                    # Use Composite op
+                    logger.info(f"**Disabling PDB-M for {pdb.pdb_name}")
+                    db_composite_client.disable_pluggable_database_management_and_wait_for_state(
+                        pluggable_database_id=pdb.id,
+                        wait_for_states=["AVAILABLE"]
+                    ).data
+                    logger.info(f"Disabled PDB-M for {pdb.pdb_name}")
+            logger.info(f"**No more PDB-M for {database.db_name}. Disable CDB")
+            db_composite_client.disable_database_management_and_wait_for_state(
+                database_id=database.id,
+                wait_for_states=["AVAILABLE"]
+            )
+            end_time = time.perf_counter()
+
+            logger.info(f"No more DBM for {database.db_name}. Time: {end_time - start_time}")
+        else:
+            logger.info(f"There was no DBM for {database.db_name}")
     except ServiceError as ex:
-        logger.error(f"Failed to terminate {database.display_name} / {ocid}.  Target Service/Operation: {ex.target_service}/{ex.operation_name} Code: {ex.code}")
+        logger.error(f"Failed to disable DBM for {database.db_name} / {ocid}.  Target Service/Operation: {ex.target_service}/{ex.operation_name} Code: {ex.code}")
         logger.debug(f"Full Exception Detail: {ex}")
     
-    return database.display_name
+    return database.db_name
 
 # Only if called in Main
 if __name__ == "__main__":
@@ -103,6 +131,7 @@ if __name__ == "__main__":
 
             # Example of client
             database_client = DatabaseClient(config=config_ip, signer=signer, retry_strategy=retry.DEFAULT_RETRY_STRATEGY)
+            db_composite_client = DatabaseClientCompositeOperations(database_client)
             search_client = ResourceSearchClient(config=config_ip, signer=signer)
 
             # Could use composite operations
@@ -118,6 +147,7 @@ if __name__ == "__main__":
 
             # Create the OCI Client to use
             database_client = DatabaseClient(config, retry_strategy=retry.DEFAULT_RETRY_STRATEGY)
+            db_composite_client = DatabaseClientCompositeOperations(database_client)
             search_client = ResourceSearchClient(config)
 
     except ClientError as ex:
@@ -131,7 +161,7 @@ if __name__ == "__main__":
     base_dbs = search_client.search_resources(
         search_details=StructuredSearchDetails(
             type = "Structured",
-            query='query dbsystem resources'
+            query='query database resources'
         ),
         limit=1000
     ).data
@@ -156,7 +186,7 @@ if __name__ == "__main__":
 
     # Thread Pool with execution based on incoming list of OCIDs
     with ThreadPoolExecutor(max_workers = threads, thread_name_prefix="thread") as executor:
-        results = [executor.submit(work_function_dbsystem, ocid) for ocid in db_ocids]
+        results = [executor.submit(work_function_dbm, ocid) for ocid in db_ocids]
         logger.info(f"Kicked off {threads} threads for parallel execution - adjust as necessary")
 
     # Thread Pool with execution based on incoming list of Compartments
