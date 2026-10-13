@@ -1,0 +1,54 @@
+{
+  "web_servers": {
+    "profile": "DEFAULT",
+    "instances": [
+      "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789jkl",
+      "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789mno",
+      "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789pqr"
+    ]
+  },
+  "my-phx-servers": {
+    "profile": "PROD",
+    "instances": [
+    "ocid1.instance.oc1.phx.anyhqljtbv6267ich44r6vydjcmrmt5574x3zzrnk7kgbmjh5lcawfsrjasq",
+    "ocid1.instance.oc1.phx.anyhqljtbv6267icrfsydejrzn3svhucdabjosdgpxjhep2w5utkx2jp6dxa"
+    ]
+  },
+  "development": {
+    "profile": "DEV",
+    "instances": [
+      "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789yz1",
+      "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789234"
+    ]
+  },
+  "testing": {
+    "profile": "TEST",
+    "instances": [
+      "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789567"
+    ]
+  },
+  "production_app": {
+    "profile": "PROD",
+    {
+  "web_servers": [
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789jkl",
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789mno",
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789pqr"
+  ],
+  "database_servers": [
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789stu",
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789vwx"
+  ],
+  "development": [
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789yz1",
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789234"
+  ],
+  "testing": [
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789567"
+  ],
+  "production_app": [
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789890",
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789abc",
+    "ocid1.instance.oc1.us-ashburn-1.anyhqljrnirvylqabc123def456ghi789def"
+  ]
+}

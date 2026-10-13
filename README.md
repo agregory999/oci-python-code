@@ -2,10 +2,61 @@
 
 A collection of python scripts that I have built, to do things using the OCI APIs.  
 
+## Script Organization
+
+Scripts are being organized into top-level directories so each script remains self-contained and easy to share by path:
+
+<!-- TOPLEVEL_SCRIPT_DIRECTORIES_START -->
+- [`working/`](working/README.md) - Production-ready scripts.
+- [`experimental/`](experimental/README.md) - Prototypes and in-progress scripts.
+- [`templates/`](templates/README.md) - Reusable model scripts (simple/threaded).
+- [`non-oci/`](non-oci/README.md) - Non-OCI scripts and projects.
+<!-- TOPLEVEL_SCRIPT_DIRECTORIES_END -->
+
+To refresh generated script catalogs in these README files:
+
+```bash
+python3 tools/update_readme_scripts.py
+```
+
+## Workspace Python Environment
+
+This repo uses a shared virtual environment at `.venv` and a top-level dependency manifest in `pyproject.toml`.
+
+### Use Existing `.venv`
+
+```bash
+source .venv/bin/activate
+python --version
+pip --version
+```
+
+### Sync Dependencies From `pyproject.toml`
+
+Base + MCP extras:
+
+```bash
+.venv/bin/python -m pip install -e ".[mcp]"
+```
+
+Upgrade core packages explicitly:
+
+```bash
+.venv/bin/python -m pip install --upgrade pip oci fastmcp oracledb fastapi uvicorn httpx
+```
+
+### Current Core Dependencies
+
+- `oci`
+- `fastmcp`
+- `oracledb` (Oracle DB Python driver)
+- MCP web helpers: `fastapi`, `uvicorn`, `httpx`
+
 ## General Notes
 In order to utilize the OCI API, you must initialize using PIP:
 
 ```bash
+prompt> source .venv/bin/activate
 prompt> pip3 install oci
 
 ```

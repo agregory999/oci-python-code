@@ -129,7 +129,6 @@ dmypy.json
 .pyre/
 
 # AG - my stuff
-*.txt
 *.code-workspace
 *.json
 *.csv
@@ -145,3 +144,21 @@ tkinter/tksheet-edits.py
 tkinter/tksheet-listbox.py
 tkinter/tksheet-readme.py
 tkinter/.dynamic-group-cache-*
+
+# Generated outputs and local artifacts
+*.CSV
+*.LOG
+*.OUT
+*.TSV
+*.tmp
+*.bak
+*.swp
+*.pid
+nohup.out
+*.sqlite
+*.sqlite3
+*.db
+output/
+outputs/
+reports/
+tmp/

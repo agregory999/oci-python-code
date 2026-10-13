@@ -1,0 +1,173 @@
+# Code Musings
+
+# Showing My Details
+
+# Buttons
+
+    # # Show my permissions - essentially a filter on my groups or location
+    # show_only_my_user = tk.BooleanVar()
+    # show_only_my_compartment = tk.BooleanVar()
+    # input_my_user = ttk.Checkbutton(frm_filter, text='Show My Policies', variable=show_only_my_user, state=tk.DISABLED, command=update_show_my_details)
+    # input_my_user.grid(row=6, column=1, sticky="ew", padx=25, pady=3)
+    # input_my_compartment = ttk.Checkbutton(frm_filter, text='Show My Compartment', variable=show_only_my_compartment, state=tk.DISABLED, command=update_show_my_details)
+    # input_my_compartment.grid(row=6, column=2,  sticky="ew", padx=25, pady=3)
+
+# code for it
+# def update_show_my_details():
+#     if show_only_my_user.get():
+#         # Update the filter for me and re-run
+#         entry_subj.delete(0,tk.END)
+#         logger.info(f"Loading groups: {policy_analysis.tenancy_ocid} : {policy_analysis.config["user"]}")
+#         # Load my groups
+#         idc = policy_analysis.idm_client
+#         me = idc.get_user(
+#             # compartment_id=policy_analysis.tenancy_ocid,
+#             user_id=policy_analysis.config["user"],
+#             attributes="groups"
+#         ).data        
+#         # my_groups = idc.list_groups(
+#         #     compartment_id=policy_analysis.tenancy_ocid,
+#         #     #user_id=policy_analysis.config["user"]
+#         # ).data
+#         logger.info(f"Groups: {me.groups}")
+
+#         all_my_groups = []
+#         for g in me.groups:
+#             logger.info(f"Group: {g.display}")
+#             all_my_groups.append(g.display)
+#         #     # my_groups = idc.list_user_group_memberships(
+#         #     #     compartment_id=policy_analysis.tenancy_ocid,
+#         #     #     group_id=g.id
+#         #     # ).data 
+#         #     for ug in my_groups:
+#         #         logger.info(f"User Group: {ug.user_id} / {ug.group_id}")
+#         entry_subj.insert(0, "|".join(all_my_groups))
+#         update_output()
+
+#     if show_only_my_compartment.get():
+#         entry_loc.delete(0,tk.END)
+#         entry_loc.insert(0,"agregory")
+#         update_output()
+
+
+# def add_new_tab():
+#     tab_consolidation = ttk.Frame(tab_control)
+#     tab_control.add(tab_consolidation, text="Consolidation")
+#     current_selection = sheet_policies.get_selected_rows()
+#     logger.info(f"Selected data: {current_selection}")
+#     if current_selection:
+#         for row in current_selection:
+#             # selected_row = sheet_policies.displayed_row_to_data(current_selection.row)
+#             logger.info(f"Selected data: {sheet_policies.get_data(row)}")
+
+
+# Deletion of bad policy statements
+
+    # Danger Zone - actually make changes
+    # Make a list of policies to get edit rights to
+    policy_ocids = [inv[0] for inv in invalid_list]
+    # Get editable objects we can post back
+    pol = policy_analysis.get_policies_for_edit(policy_ocids)
+    for i, ed in enumerate(pol):
+        etag, policy = ed
+        # For each policy, go through statements
+        # Remove the bad statement
+        logger.info(f"Removing statment: {invalid_list[i][1]} from policy: {invalid_list[i][0]}")
+        policy.statements.remove(invalid_list[i][1])
+    
+    # Post back for changes to occur (policy engine will do it with optimistic concurrency)
+    policy_analysis.update_policies(pol)
+
+
+# Policy Optimistic Edit
+
+    # Get a policy for the purpose of updating one of the statements
+    def get_policies_for_edit(self, policy_ocids: list[str]) -> list[tuple]:
+        """Given a policy we want to edit, return the policy""" 
+
+        # Get a list for returned policies
+        policies_returned = []
+
+        # Use a set
+        myset = set(policy_ocids)
+        self.logger.info(f"Policies: {len(policy_ocids)} Unique: {len(myset)}")
+
+        for ocid in myset:
+            pol_resp = self.identity_client.get_policy(policy_id=ocid)
+            self.logger.info(f'Policy: {pol_resp.data.name} Etag: {pol_resp.headers["ETag"]}')
+            # self.logger.info(f"Full Policy: {pol_resp.data}")
+            policies_returned.append((pol_resp.headers["ETag"], pol_resp.data))
+        
+        # Return a list of policies that are tuple(etag, policy)
+        self.logger.info(f"Policies returned: {len(policies_returned)}")
+        return (policies_returned)
+
+    def update_policies(self, policies_to_update: list[tuple]) -> bool:
+        """Update the policy with optimistic concurrency, to ensure it wasn't mucked with"""
+
+        updated_policies = []
+        for item in policies_to_update:
+
+            etag, policy_to_update = item
+            self.logger.info(f"Updating Policy: {policy_to_update}")
+            try:
+                logger.info(f"**Would change policy {policy_to_update.name} to {policy_to_update.statements}")
+                # self.identity_client.update_policy(policy_id=policy_to_update.id, 
+                #                                 update_policy_details=UpdatePolicyDetails(description=policy_to_update.description,
+                #                                                                             statements=policy_to_update.statements,
+                #                                                                             defined_tags=policy_to_update.defined_tags,
+                #                                                                             freeform_tags=policy_to_update.freeform_tags),
+                #                                 if_match=etag)
+                self.logger.info(f"Updated Policy: {policy_to_update}")
+                ret = (policy_to_update, True)
+                updated_policies.append(ret)
+            except ServiceError as se:
+                if se.code == "NoEtagMatch":
+                    self.logger.warning(f"Could not update due to etag mismatch")
+                ret = (policy_to_update, False)
+            except Exception as e:
+                self.logger.warning(f"Could not update due to error: {e}")
+                ret = (policy_to_update, False)
+        self.logger.info(f"Finished updating policies")
+            
+
+
+# Policy Main
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s [%(threadName)s] %(levelname)s %(message)s')
+    logger = logging.getLogger('oci-policy')
+    logger.info(f"Policy Main")
+
+    a = PolicyAnalysis(None, False)
+    a.initialize_client("DEFAULT", False, False, True)
+    a.load_policies_from_client()
+
+    pol = a.get_policies_for_edit(["ocid1.policy.oc1..aaaaaaaahyfaqwlgcfa3umh7qvii5or2axu5zwbzrp6wozrfjahd57nxowwq","ocid1.policy.oc1..aaaaaaaalg77zmpk7sabowkklzd6dmpy5dfwumvkhckeodia3j2eob2nllza"])
+    for i, ed in enumerate(pol):
+        etag, policy = ed
+        policy.statements.append(f"allow group foo{i} to read object-family in compartment agregory")
+        policy.statements.remove
+    time.sleep(8)
+    a.update_policies(pol)
+    logger.info(f"Policy: {pol}")
+
+# DG Main
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s [%(threadName)s] %(levelname)s %(message)s')
+    logger = logging.getLogger('oci-dynamic')
+    logger.info(f"DG Main")
+
+    a = DynamicGroupAnalysis(None, False)
+    a.initialize_client("DEFAULT", False, False, True)
+    a.load_policies_from_client()
+
+    pol = a.get_policies_for_edit(["ocid1.policy.oc1..aaaaaaaahyfaqwlgcfa3umh7qvii5or2axu5zwbzrp6wozrfjahd57nxowwq","ocid1.policy.oc1..aaaaaaaalg77zmpk7sabowkklzd6dmpy5dfwumvkhckeodia3j2eob2nllza"])
+    for i, ed in enumerate(pol):
+        etag, policy = ed
+        policy.statements.append(f"allow group foo{i} to read object-family in compartment agregory")
+        policy.statements.remove
+    time.sleep(8)
+    a.update_policies(pol)
+    logger.info(f"Policy: {pol}")
