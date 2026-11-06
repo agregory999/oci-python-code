@@ -5,7 +5,7 @@ Examples:
   python working/oci_cost_by_sku_compartment.py --sku B12345
   python working/oci_cost_by_sku_compartment.py --sku B12345 -p MY_PROFILE --csv costs.csv
   python working/oci_cost_by_sku_compartment.py --sku B12345 --month 2026-10
-  python working/oci_cost_by_sku_compartment.py --sku B91628 -p ANDGRE-5678 --ytd --csv ytd.csv
+  python working/oci_cost_by_sku_compartment.py --sku B12345 -p MY_PROFILE --ytd --csv ytd.csv
 
 Requires the OCI SDK and permission to read usage-report in tenancy.
 """
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -25,7 +26,7 @@ from oci.usage_api.models import Dimension, Filter, RequestSummarizedUsagesDetai
 
 
 COLUMNS = [
-    "month", "sku_part_number", "compartment_id", "compartment_name",
+    "month", "sku_part_number", "service", "compartment_id", "compartment_name", "resource_id",
     "unit", "currency", "usage_quantity", "cost", "effective_unit_cost",
     "api_unit_price",
 ]
@@ -49,11 +50,13 @@ def month_bounds(month: str | None = None, now: datetime | None = None):
 
 def fetch_rows(client, tenancy_id: str, sku: str, start: datetime, end: datetime,
                *, partial_month: bool = False):
-    """Fetch every page of monthly compartment totals for one SKU.
+    """Fetch monthly resource costs for one SKU, retaining service attribution.
 
-    COST automatically groups by currency; include it explicitly along with
-    unit so both computed_amount and computed_quantity are meaningful.
-    Four grouping dimensions is the API maximum. The SKU comes from the filter.
+    COST automatically groups by currency; include unit explicitly so both
+    computed_amount and computed_quantity are meaningful. The four explicit
+    groups are compartment, service, resource, and unit; SKU is fixed by filter.
+    Compartment names are retrieved with a separate Usage API query, avoiding
+    an Identity API permission requirement or grouping by non-unique names.
     """
     request = RequestSummarizedUsagesDetails(
         tenant_id=tenancy_id,
@@ -63,39 +66,57 @@ def fetch_rows(client, tenancy_id: str, sku: str, start: datetime, end: datetime
         query_type="COST",
         is_aggregate_by_time=partial_month,
         compartment_depth=6,
-        group_by=["compartmentId", "compartmentName", "unit", "currency"],
+        group_by=["compartmentId", "service", "resourceId", "unit"],
         filter=Filter(
             operator="AND",
             dimensions=[Dimension(key="skuPartNumber", value=sku)],
         ),
     )
     rows = []
+    for item in usage_items(client, request):
+        quantity = (
+            Decimal(str(item.computed_quantity))
+            if item.computed_quantity is not None else None
+        )
+        cost = Decimal(str(item.computed_amount)) if item.computed_amount is not None else None
+        effective = cost / quantity if cost is not None and quantity else None
+        rows.append({
+            "month": (start if partial_month else item.time_usage_started).strftime("%Y-%m"),
+            "sku_part_number": sku,
+            "service": item.service,
+            "compartment_id": item.compartment_id,
+            "compartment_name": None,
+            "resource_id": item.resource_id,
+            "unit": item.unit,
+            "currency": item.currency,
+            "usage_quantity": quantity,
+            "cost": cost,
+            "effective_unit_cost": effective,
+            "api_unit_price": item.unit_price,
+        })
+    if rows:
+        names_request = deepcopy(request)
+        names_request.group_by = ["compartmentId", "compartmentName"]
+        names_request.is_aggregate_by_time = True
+        names = {}
+        for item in usage_items(client, names_request):
+            names.setdefault(item.compartment_id, set()).add(item.compartment_name or "")
+        for row in rows:
+            # If billing history has multiple names for an OCID, retain them
+            # deterministically instead of selecting an arbitrary page's name.
+            row["compartment_name"] = " | ".join(sorted(names.get(row["compartment_id"], set())))
+    return rows
+
+
+def usage_items(client, request):
+    """Iterate all pages for either the cost breakdown or name lookup."""
     page = None
     while True:
         response = client.request_summarized_usages(request, page=page)
-        for item in response.data.items:
-            quantity = (
-                Decimal(str(item.computed_quantity))
-                if item.computed_quantity is not None else None
-            )
-            cost = Decimal(str(item.computed_amount)) if item.computed_amount is not None else None
-            effective = cost / quantity if cost is not None and quantity else None
-            rows.append({
-                "month": (start if partial_month else item.time_usage_started).strftime("%Y-%m"),
-                "sku_part_number": sku,
-                "compartment_id": item.compartment_id,
-                "compartment_name": item.compartment_name,
-                "unit": item.unit,
-                "currency": item.currency,
-                "usage_quantity": quantity,
-                "cost": cost,
-                "effective_unit_cost": effective,
-                "api_unit_price": item.unit_price,
-            })
+        yield from response.data.items
         page = response.next_page
         if not page:
             break
-    return rows
 
 
 def report_rows(client, tenancy_id: str, sku: str, start: datetime, end: datetime):
@@ -103,7 +124,7 @@ def report_rows(client, tenancy_id: str, sku: str, start: datetime, end: datetim
 
     The API requires MONTHLY boundaries on the first of a month. A separate
     DAILY query aggregates the current month's completed UTC days into one row
-    per compartment/unit/currency. Both queries paginate independently.
+    per compartment/service/resource/unit/currency. All queries paginate independently.
     """
     rows = []
     month_start = end.replace(day=1)
@@ -113,7 +134,7 @@ def report_rows(client, tenancy_id: str, sku: str, start: datetime, end: datetim
         rows.extend(fetch_rows(client, tenancy_id, sku, month_start, end, partial_month=True))
     return sorted(rows, key=lambda row: tuple(
         str(row[key] or "") for key in
-        ("compartment_name", "compartment_id", "month", "currency", "unit")
+        ("compartment_name", "compartment_id", "month", "service", "resource_id", "currency", "unit")
     ))
 
 

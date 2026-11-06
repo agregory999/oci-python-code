@@ -15,7 +15,7 @@ uv run python working/oci_cost_by_sku_compartment.py --sku B12345 -p DEFAULT --c
 # Optional: select a different completed month
 uv run python working/oci_cost_by_sku_compartment.py --sku B12345 --month 2026-09
 # Year to date, with a monthly breakdown for each compartment
-uv run python working/oci_cost_by_sku_compartment.py --sku B91628 -p ANDGRE-5678 --ytd --csv sku_ytd.csv
+uv run python working/oci_cost_by_sku_compartment.py --sku B12345 -p MY_PROFILE --ytd --csv sku_ytd.csv
 ```
 
 Replace `B12345` with your SKU. Run these commands from the repository root.
@@ -29,18 +29,38 @@ completed days are aggregated into a single partial-month bucket. On January 1,
 YTD has no completed days and returns a header-only CSV. Today is excluded because
 its usage is incomplete. The default remains the last complete month.
 
-For long compartment lists, CSV uses one row per compartment/month/unit/currency,
-sorted by compartment name, OCID, and month. Every page of both queries is
+For long compartment lists, CSV uses one row per compartment/month/service/SKU/resource/unit/currency,
+sorted by compartment name, OCID, month, service, and resource ID. Every page of all queries is
 retrieved. Only combinations returned by OCI are included; missing months are
 not filled with zeros. The `month` column comes from each API bucket so different
 months remain separate. A YTD run in November includes January–October and a
 partial November bucket when matching usage is available.
 
-Output contains the month, SKU, compartment OCID and name, unit, currency,
+Output contains the month, SKU, service, compartment OCID and name, resource ID, unit, currency,
 usage quantity, cost, effective unit cost, and API unit price. Results are grouped
-by compartment, unit, and currency across all regions. Compartment depth is 6,
+by compartment, service, resource, unit, and currency across all regions for the selected SKU. Compartment depth is 6,
 covering the supported compartment hierarchy. Unassigned compartment fields stay
 blank. A compartment with multiple units or currencies has separate rows.
+
+The same SKU in multiple services and resources produces separate rows for each
+combination in a compartment and month. To respect OCI's four-field grouping
+limit, the script groups by `compartmentId`, `service`, `resourceId`, and `unit`.
+OCI automatically adds currency for COST queries; currency remains in the output
+and separate currency buckets are preserved. The SKU is fixed by the filter and
+copied to every row. A separate paginated Usage API query retrieves
+compartment names by OCID without requiring Identity API access. If an OCID has
+multiple names in the queried billing history, the names are joined with ` | `.
+Names are labels; the compartment OCID remains the grouping identity.
+
+`resource_id` contains the resource identifier supplied by OCI billing. Charges
+without a resource identifier are retained with an empty field; no OCID is
+inferred. Identifiers are preserved exactly, including any service-specific
+values that are not OCIDs. The script does not require permission to inspect
+the actual resources.
+
+```sh
+uv run python working/oci_cost_by_sku_compartment.py --sku B12345 -p MY_PROFILE --ytd --csv sku_ytd_by_resource.csv
+```
 
 `effective_unit_cost` is the month's `computed_amount / computed_quantity`, a
 blended effective rate rather than a contractual/list price. It is blank when

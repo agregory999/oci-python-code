@@ -22,11 +22,13 @@ def date(value):
     return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
 
 
-def item(month, compartment="A", quantity=4, cost=12):
+def item(month, compartment="A", quantity=4, cost=12, service="OBJECT_STORAGE", resource_id="ocid.resource.1"):
     return oci.usage_api.models.UsageSummary(
         time_usage_started=date(f"2026-{month:02}-01"),
         compartment_id=f"ocid.{compartment}", compartment_name=compartment,
         computed_quantity=quantity, computed_amount=cost, unit="GB Months", currency="USD",
+        service=service,
+        resource_id=resource_id,
     )
 
 
@@ -50,8 +52,10 @@ class ReportTests(unittest.TestCase):
         client = Mock()
         client.request_summarized_usages.side_effect = [
             page([item(2, "B"), item(1)], "monthly-2"),
-            page([item(2)]), page([item(11)], "daily-2"),
+            page([item(2)]), page([item(1), item(1, "B")]),
+            page([item(11)], "daily-2"),
             page([item(11, "B", quantity=0)]),
+            page([item(11), item(11, "B")]),
         ]
         rows = report.report_rows(client, "tenancy", "B91628",
                                   date("2026-01-01"), date("2026-11-06"))
@@ -62,8 +66,9 @@ class ReportTests(unittest.TestCase):
         self.assertIsNone(rows[-1]["effective_unit_cost"])
         calls = client.request_summarized_usages.call_args_list
         self.assertEqual(calls[1].kwargs["page"], "monthly-2")
-        self.assertEqual(calls[3].kwargs["page"], "daily-2")
-        monthly, daily = calls[0].args[0], calls[2].args[0]
+        self.assertEqual(calls[4].kwargs["page"], "daily-2")
+        monthly, daily = calls[0].args[0], calls[3].args[0]
+        self.assertEqual(monthly.group_by, ["compartmentId", "service", "resourceId", "unit"])
         self.assertEqual(monthly.granularity, "MONTHLY")
         self.assertFalse(monthly.is_aggregate_by_time)
         self.assertEqual(monthly.time_usage_ended, date("2026-11-01"))
@@ -79,7 +84,40 @@ class ReportTests(unittest.TestCase):
         rows = report.report_rows(client, "tenancy", "B91628",
                                   date("2026-10-01"), date("2026-11-01"))
         self.assertEqual(rows[0]["month"], "2026-10")
-        client.request_summarized_usages.assert_called_once()
+        self.assertEqual(client.request_summarized_usages.call_count, 2)
+
+    def test_services_stay_separate_and_name_lookup_paginates(self):
+        client = Mock()
+        first = item(10, service="OBJECT_STORAGE")
+        second = item(10, quantity=2, cost=8, service="DATABASE")
+        first.compartment_name = second.compartment_name = None
+        client.request_summarized_usages.side_effect = [
+            page([first, second]),
+            page([], "names-2"), page([item(10)]),
+        ]
+        rows = report.report_rows(client, "tenancy", "B91628",
+                                  date("2026-10-01"), date("2026-11-01"))
+        self.assertEqual([row["service"] for row in rows], ["DATABASE", "OBJECT_STORAGE"])
+        self.assertEqual([row["compartment_name"] for row in rows], ["A", "A"])
+        self.assertEqual([row["effective_unit_cost"] for row in rows], [Decimal(4), Decimal(3)])
+        self.assertEqual(sum(row["cost"] for row in rows), Decimal(20))
+        calls = client.request_summarized_usages.call_args_list
+        self.assertEqual(calls[1].args[0].group_by, ["compartmentId", "compartmentName"])
+        self.assertEqual(calls[2].kwargs["page"], "names-2")
+
+    def test_resources_and_unassigned_charges_are_retained(self):
+        client = Mock()
+        client.request_summarized_usages.side_effect = [
+            page([item(10, resource_id=None), item(10)], "resources-2"),
+            page([item(10, resource_id="ocid.resource.2")]), page([item(10)]),
+        ]
+        rows = report.report_rows(client, "tenancy", "B91628",
+                                  date("2026-10-01"), date("2026-11-01"))
+        self.assertEqual([r["resource_id"] for r in rows], [None, "ocid.resource.1", "ocid.resource.2"])
+        self.assertEqual(sum(r["cost"] for r in rows), Decimal(36))
+        calls = client.request_summarized_usages.call_args_list
+        self.assertEqual(calls[1].kwargs["page"], "resources-2")
+        self.assertTrue(all(len(call.args[0].group_by) <= 4 for call in calls))
 
     def test_january_first_has_no_completed_days(self):
         client = Mock()
